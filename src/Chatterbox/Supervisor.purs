@@ -1,19 +1,14 @@
 module Chatterbox.Supervisor
   ( startLink
-  , start_link
   ) where
 
 import Prelude
 
 import Chatterbox.Channel.Supervisor as ChannelSupervisor
-import Chatterbox.Types (ErlangResult)
 import Chatterbox.User.Supervisor as UserSupervisor
-import Chatterbox.Utilities (StartErrorReason)
-import Chatterbox.Utilities as Utilities
 import Data.Maybe (Maybe(..))
 import Data.Time.Duration (Milliseconds(..), Seconds(..))
 import Effect (Effect)
-import Effect.Unsafe as UnsafeEffect
 import Erl.Atom (atom)
 import Erl.Data.List as ErlList
 import Erl.Process.Raw (class HasPid)
@@ -40,9 +35,6 @@ startLink = Supervisor.startLink (Just $ Local $ atom "Chatterbox.Supervisor") $
   strategy = Supervisor.OneForOne
   intensity = 3
   period = Seconds 5.0
-
-start_link :: ErlangResult StartErrorReason SupervisorPid
-start_link = UnsafeEffect.unsafePerformEffect $ Utilities.createUnsafeStartResult <$> startLink
 
 supervisor
   :: forall childProcess
