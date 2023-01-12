@@ -16,7 +16,7 @@ defmodule Chatterbox.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      mod: {Chatterbox.Application, []},
+      mod: {:chatterbox_application@ps, []},
       extra_applications: [:logger]
     ]
   end
