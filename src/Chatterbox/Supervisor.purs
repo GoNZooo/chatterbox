@@ -7,6 +7,7 @@ import Prelude
 
 import Chatterbox.Channel.Supervisor as ChannelSupervisor
 import Chatterbox.Types (ErlangResult)
+import Chatterbox.User.Supervisor as UserSupervisor
 import Chatterbox.Utilities (StartErrorReason)
 import Chatterbox.Utilities as Utilities
 import Data.Maybe (Maybe(..))
@@ -32,7 +33,9 @@ startLink = Supervisor.startLink (Just $ Local $ atom "Chatterbox.Supervisor") $
   where
   supervisorSpec = { childSpecs, flags }
   childSpecs = ErlList.fromFoldable
-    [ worker "Chatterbox.Channel.Supervisor" ChannelSupervisor.startLink ]
+    [ supervisor "Chatterbox.Channel.Supervisor" ChannelSupervisor.startLink
+    , supervisor "Chatterbox.User.Supervisor" UserSupervisor.startLink
+    ]
   flags = { strategy, intensity, period }
   strategy = Supervisor.OneForOne
   intensity = 3
@@ -41,16 +44,16 @@ startLink = Supervisor.startLink (Just $ Local $ atom "Chatterbox.Supervisor") $
 start_link :: ErlangResult StartErrorReason SupervisorPid
 start_link = UnsafeEffect.unsafePerformEffect $ Utilities.createUnsafeStartResult <$> startLink
 
-worker
+supervisor
   :: forall childProcess
    . HasPid childProcess
   => String
   -> Effect (StartLinkResult childProcess)
   -> ErlChildSpec
-worker id start =
+supervisor id start =
   spec
     { id
-    , childType: Worker
+    , childType: Supervisor
     , start
     , restartStrategy: RestartTransient
     , shutdownStrategy: ShutdownTimeout $ Milliseconds 5000.0
