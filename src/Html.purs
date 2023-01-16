@@ -133,6 +133,20 @@ type SvgAttributes =
 svg :: forall as as' r. AttributeRecord as as' r SvgAttributes => Record as -> Children -> Html
 svg attributes = HtmlNode "svg" (makeAttributeValues attributes)
 
+type ScriptAttributes =
+  ( async :: Boolean
+  , charset :: String
+  , crossorigin :: String
+  , defer :: Boolean
+  , integrity :: String
+  , language :: String
+  , src :: String
+  , type :: String
+  )
+
+script :: forall as as' r. AttributeRecord as as' r ScriptAttributes => Record as -> Children -> Html
+script attributes = HtmlNode "script" (makeAttributeValues attributes)
+
 render :: Html -> String
 render (HtmlNode "html" attributes children) =
   fold

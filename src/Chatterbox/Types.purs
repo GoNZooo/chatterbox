@@ -1,13 +1,29 @@
 module Chatterbox.Types where
 
-import Control.Applicative (class Applicative)
-import Control.Apply (class Apply)
-import Control.Bind (class Bind)
-import Control.Monad (class Monad)
-import Data.Eq (class Eq)
-import Data.Functor (class Functor)
+import Prelude
+
 import Data.Generic.Rep (class Generic)
-import Data.Ord (class Ord)
+import Data.Newtype (class Newtype)
+import Foreign (ForeignError(..), fail)
+import Simple.JSON (class ReadForeign, class WriteForeign, readImpl, writeImpl)
+
+data WebsocketMessage = EchoMessage String
+
+derive instance genericWebsocketMessage :: Generic WebsocketMessage _
+derive instance eqWebsocketMessage :: Eq WebsocketMessage
+
+instance showWebsocketMessage :: Show WebsocketMessage where
+  show (EchoMessage s) = "EchoMessage " <> show s
+
+instance writeForeignWebsocketMessage :: WriteForeign WebsocketMessage where
+  writeImpl (EchoMessage s) = writeImpl { type: "EchoMessage", message: s }
+
+instance readForeignWebsocketMessage :: ReadForeign WebsocketMessage where
+  readImpl f = do
+    HasTypeField { type: t } <- readImpl f
+    case t of
+      "EchoMessage" -> EchoMessage <$> readImpl f
+      _ -> fail $ ForeignError $ "Unknown type: " <> t
 
 data ErlangResult l r
   = Error l
@@ -40,4 +56,11 @@ instance bindErlangResult :: Bind (ErlangResult l) where
 instance monadErlangResult :: Monad (ErlangResult l)
 
 foreign import data UnsafeStartResult :: Type
+
+newtype HasTypeField = HasTypeField { type :: String }
+
+derive instance newtypeHasTypeField :: Newtype HasTypeField _
+
+instance readForeignHasTypeField :: ReadForeign HasTypeField where
+  readImpl f = HasTypeField <$> readImpl f
 
