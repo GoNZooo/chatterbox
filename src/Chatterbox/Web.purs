@@ -2,21 +2,25 @@ module Chatterbox.Web where
 
 import Prelude hiding ((/))
 
-import Chatterbox.Types (WebsocketMessage)
+import Chatterbox.Types (WebsocketMessage(..), WebsocketState(..))
 import Data.Array as Array
+import Data.Foldable (traverse_)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromJust)
 import Data.Show.Generic (genericShow)
+import Data.Time.Duration (Milliseconds(..))
 import Effect (Effect)
-import Effect.Class (liftEffect)
+import Effect.Class (class MonadEffect, liftEffect)
 import Erl.Atom (atom)
 import Erl.Cowboy.Handlers.WebSocket (Frame(..))
 import Erl.Cowboy.Req (Req)
 import Erl.Data.Binary.IOData (IOData)
 import Erl.Data.Binary.IOData as IOData
+import Erl.Data.Binary.UTF8 as Utf8Binary
 import Erl.Data.List (nil, (:))
 import Erl.Data.Tuple (Tuple2, tuple2)
 import Erl.Kernel.Inet (Port(..), ip4)
+import Erl.Process (class HasSelf)
 import Html as H
 import Html.Types (Html)
 import Logger as Logger
@@ -24,6 +28,8 @@ import Partial.Unsafe (unsafePartial)
 import Pinto.GenServer (InitFn, InitResult(..), ServerPid, ServerType)
 import Pinto.GenServer as GenServer
 import Pinto.GenServer.Helpers as GenServerHelpers
+import Pinto.Timer (TimerRef)
+import Pinto.Timer as Timer
 import Pinto.Types (RegistryName(..), StartLinkResult)
 import Routing.Duplex (RouteDuplex')
 import Routing.Duplex as Routing
@@ -97,36 +103,46 @@ indexHandler =
     , contentTypesProvided: \r s -> Rest.result (htmlWriter : nil) r s
     }
 
-websocketHandler :: StetsonHandler WebsocketMessage Unit
+websocketHandler :: StetsonHandler WebsocketMessage WebsocketState
 websocketHandler =
   routeHandler
-    { init: \r -> WebSocket.initResult r unit
+    { init: \r -> WebSocket.initResult r $ WebsocketState { lastPing: Nothing, pingTimerRef: Nothing }
     , wsInit
     , wsHandle
     , wsInfo
     }
   where
-  wsInit state = do
-    pure $ Stetson.NoReply state
+  wsInit (WebsocketState state) = do
+    timerRef <- schedulePingMessage
+    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
   -- Handles messages from the client that is connected to the websocket
-  wsHandle frame state = do
+  wsHandle frame (WebsocketState state@{ pingTimerRef }) = do
+    liftEffect $ traverse_ Timer.cancel pingTimerRef
+    timerRef <- schedulePingMessage
     liftEffect $ Logger.info { domain: atom "websocket" : atom "frame" : nil, type: Logger.Trace }
       { message: "Received frame: " <> frameToString frame }
-    pure $ Stetson.NoReply state
+    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
   -- Like a classic `handle_info`; handles arbitrary messages sent to the process. This will be
   -- used to react to messages that come in from subscriptions.
+  wsInfo SendPing state = do
+    liftEffect $ Logger.info { domain: atom "websocket" : atom "ping" : nil, type: Logger.Trace }
+      { message: "Sending ping" }
+    pure $ Stetson.Reply ((PingFrame $ Utf8Binary.toBinary "42") : nil) state
   wsInfo message state = do
     liftEffect $ Logger.info { domain: atom "websocket" : atom "info" : nil, type: Logger.Trace }
       { message: "Received info: " <> show message }
     pure $ Stetson.Reply ((TextFrame $ Json.writeJSON message) : nil) state
 
+schedulePingMessage :: forall m. HasSelf m WebsocketMessage => MonadEffect m => m TimerRef
+schedulePingMessage = Timer.sendAfter (Milliseconds 25_000.0) SendPing
+
 frameToString :: Frame -> String
 frameToString (TextFrame s) = "TextFrame " <> s
-frameToString (BinaryFrame b) = "BinaryFrame" <> show b
-frameToString (PingFrame b) = "PingFrame" <> show b
-frameToString (PongFrame b) = "PongFrame" <> show b
+frameToString (BinaryFrame b) = "BinaryFrame " <> show b
+frameToString (PingFrame b) = "PingFrame " <> show b
+frameToString (PongFrame b) = "PongFrame " <> show b
 
 layout :: Html -> Html
 layout content =

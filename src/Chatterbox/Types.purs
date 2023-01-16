@@ -3,27 +3,41 @@ module Chatterbox.Types where
 import Prelude
 
 import Data.Generic.Rep (class Generic)
+import Data.Maybe (Maybe)
 import Data.Newtype (class Newtype)
 import Foreign (ForeignError(..), fail)
+import Pinto.Timer (TimerRef)
 import Simple.JSON (class ReadForeign, class WriteForeign, readImpl, writeImpl)
 
-data WebsocketMessage = EchoMessage String
+data WebsocketMessage
+  = EchoMessage String
+  | SendPing
 
 derive instance genericWebsocketMessage :: Generic WebsocketMessage _
 derive instance eqWebsocketMessage :: Eq WebsocketMessage
 
 instance showWebsocketMessage :: Show WebsocketMessage where
   show (EchoMessage s) = "EchoMessage " <> show s
+  show SendPing = "SendPing"
 
 instance writeForeignWebsocketMessage :: WriteForeign WebsocketMessage where
   writeImpl (EchoMessage s) = writeImpl { type: "EchoMessage", message: s }
+  writeImpl SendPing = writeImpl { type: "SendPing" }
 
 instance readForeignWebsocketMessage :: ReadForeign WebsocketMessage where
   readImpl f = do
     HasTypeField { type: t } <- readImpl f
     case t of
       "EchoMessage" -> EchoMessage <$> readImpl f
+      "SendPing" -> pure SendPing
       _ -> fail $ ForeignError $ "Unknown type: " <> t
+
+newtype WebsocketState = WebsocketState { lastPing :: Maybe Int, pingTimerRef :: Maybe TimerRef }
+
+derive instance newtypeWebsocketState :: Newtype WebsocketState _
+
+instance showWebsocketState :: Show WebsocketState where
+  show (WebsocketState { lastPing }) = "WebsocketState " <> show { lastPing }
 
 data ErlangResult l r
   = Error l
