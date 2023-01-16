@@ -6,6 +6,7 @@ import Prelude
 
 import Chatterbox.Channel.Supervisor as ChannelSupervisor
 import Chatterbox.User.Supervisor as UserSupervisor
+import Chatterbox.Web as Web
 import Data.Maybe (Maybe(..))
 import Data.Time.Duration (Milliseconds(..), Seconds(..))
 import Effect (Effect)
@@ -30,6 +31,7 @@ startLink = Supervisor.startLink (Just $ Local $ atom "Chatterbox.Supervisor") $
   childSpecs = ErlList.fromFoldable
     [ supervisor "Chatterbox.Channel.Supervisor" ChannelSupervisor.startLink
     , supervisor "Chatterbox.User.Supervisor" UserSupervisor.startLink
+    , worker "Chatterbox.Web" $ Web.startLink {}
     ]
   flags = { strategy, intensity, period }
   strategy = Supervisor.OneForOne
@@ -46,6 +48,21 @@ supervisor id start =
   spec
     { id
     , childType: Supervisor
+    , start
+    , restartStrategy: RestartTransient
+    , shutdownStrategy: ShutdownTimeout $ Milliseconds 5000.0
+    }
+
+worker
+  :: forall childProcess
+   . HasPid childProcess
+  => String
+  -> Effect (StartLinkResult childProcess)
+  -> ErlChildSpec
+worker id start =
+  spec
+    { id
+    , childType: Worker
     , start
     , restartStrategy: RestartTransient
     , shutdownStrategy: ShutdownTimeout $ Milliseconds 5000.0
