@@ -2,7 +2,8 @@ module Chatterbox.Web where
 
 import Prelude hiding ((/))
 
-import Chatterbox.Types (WebsocketMessage(..), WebsocketState(..))
+import Chatterbox.Common.Types (ServerMessage(..))
+import Chatterbox.Types (WebsocketState(..))
 import Data.Array as Array
 import Data.Foldable (traverse_)
 import Data.Generic.Rep (class Generic)
@@ -103,7 +104,7 @@ indexHandler =
     , contentTypesProvided: \r s -> Rest.result (htmlWriter : nil) r s
     }
 
-websocketHandler :: StetsonHandler WebsocketMessage WebsocketState
+websocketHandler :: StetsonHandler ServerMessage WebsocketState
 websocketHandler =
   routeHandler
     { init: \r -> WebSocket.initResult r $ WebsocketState { lastPing: Nothing, pingTimerRef: Nothing }
@@ -135,7 +136,7 @@ websocketHandler =
       { message: "Received info: " <> show message }
     pure $ Stetson.Reply ((TextFrame $ Json.writeJSON message) : nil) state
 
-schedulePingMessage :: forall m. HasSelf m WebsocketMessage => MonadEffect m => m TimerRef
+schedulePingMessage :: forall m. HasSelf m ServerMessage => MonadEffect m => m TimerRef
 schedulePingMessage = Timer.sendAfter (Milliseconds 25_000.0) SendPing
 
 frameToString :: Frame -> String
