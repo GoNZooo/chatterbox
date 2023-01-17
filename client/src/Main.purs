@@ -25,9 +25,11 @@ mainComponent = H.mkComponent { initialState, render, eval }
   where
   initialState _ = { count: 0 }
   render { count } = HH.div_
-    [ HH.button [ HE.onClick \_ -> Decrement ] [ HH.text "-" ]
-    , HH.text $ show count
-    , HH.button [ HE.onClick \_ -> Increment ] [ HH.text "+" ]
+    [ HH.div_
+        [ HH.button [ HE.onClick \_ -> Decrement ] [ HH.text "-" ]
+        , HH.text $ show count
+        , HH.button [ HE.onClick \_ -> Increment ] [ HH.text "+" ]
+        ]
     , HH.text $ show $ EchoMessage "Hello"
     ]
   eval = H.mkEval H.defaultEval { handleAction = handleAction }
