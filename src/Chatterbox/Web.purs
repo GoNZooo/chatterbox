@@ -114,6 +114,8 @@ websocketHandler =
     }
   where
   wsInit (WebsocketState state) = do
+    liftEffect $ Logger.info { domain: atom "ws" : atom "init" : nil, type: Logger.Trace }
+      { message: "Websocket init" }
     timerRef <- schedulePingMessage
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 

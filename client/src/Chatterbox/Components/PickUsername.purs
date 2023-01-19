@@ -7,10 +7,13 @@ module Chatterbox.Components.PickUsername
 import Prelude
 
 import Effect.Aff.Class (class MonadAff)
+import Effect.Class as Effect
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import Web.Event.Event (Event)
+import Web.Event.Event as Event
 
 type Input = {}
 
@@ -18,7 +21,7 @@ type State = { username :: String }
 
 data Action
   = SetUsernameField String
-  | PickUsername String
+  | PickUsername String Event
 
 data Output = UsernamePicked String
 
@@ -32,7 +35,7 @@ component = H.mkComponent
   render :: State -> H.ComponentHTML Action () m
   render { username } =
     HH.div_
-      [ HH.form [ HE.onSubmit \_ -> PickUsername username ]
+      [ HH.form [ HE.onSubmit \e -> PickUsername username e ]
           [ HH.input
               [ HP.type_ HP.InputText
               , HP.value username
@@ -44,5 +47,7 @@ component = H.mkComponent
 
   handleAction :: Action -> H.HalogenM State Action () Output m Unit
   handleAction (SetUsernameField username) = H.modify_ _ { username = username }
-  handleAction (PickUsername username) = H.raise $ UsernamePicked username
+  handleAction (PickUsername username e) = do
+    Effect.liftEffect $ Event.preventDefault e
+    H.raise $ UsernamePicked username
 

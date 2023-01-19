@@ -12,7 +12,8 @@ to generate this file without the comments in this block.
 -}
 { name = "chatterbox-client"
 , dependencies =
-  [ "console"
+  [ "aff"
+  , "console"
   , "effect"
   , "either"
   , "foreign"
@@ -23,6 +24,7 @@ to generate this file without the comments in this block.
   , "routing"
   , "routing-duplex"
   , "simple-json"
+  , "web-socket"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs", "../Common/**/*.purs" ]
