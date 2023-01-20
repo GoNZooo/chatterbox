@@ -2,9 +2,11 @@ module Chatterbox.Web where
 
 import Prelude hiding ((/))
 
-import Chatterbox.Common.Types (ServerMessage(..))
+import Chatterbox.Common.Types (ServerMessage(..), ClientMessage(..))
 import Chatterbox.Types (WebsocketState(..))
+import Chatterbox.User as User
 import Data.Array as Array
+import Data.Either (Either(..))
 import Data.Foldable (traverse_)
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromJust)
@@ -21,7 +23,7 @@ import Erl.Data.Binary.UTF8 as Utf8Binary
 import Erl.Data.List (nil, (:))
 import Erl.Data.Tuple (Tuple2, tuple2)
 import Erl.Kernel.Inet (Port(..), ip4)
-import Erl.Process (class HasSelf)
+import Erl.Process (class HasSelf, self)
 import Html as H
 import Html.Types (Html)
 import Logger as Logger
@@ -120,12 +122,13 @@ websocketHandler =
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
   -- Handles messages from the client that is connected to the websocket
+  wsHandle :: _
   wsHandle frame (WebsocketState state@{ pingTimerRef }) = do
     liftEffect $ traverse_ Timer.cancel pingTimerRef
     timerRef <- schedulePingMessage
     liftEffect $ Logger.info { domain: atom "websocket" : atom "frame" : nil, type: Logger.Trace }
       { message: "Received frame: " <> frameToString frame }
-    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
+    handleFrame frame state timerRef
 
   -- Like a classic `handle_info`; handles arbitrary messages sent to the process. This will be
   -- used to react to messages that come in from subscriptions.
@@ -133,10 +136,33 @@ websocketHandler =
     liftEffect $ Logger.info { domain: atom "websocket" : atom "ping" : nil, type: Logger.Trace }
       { message: "Sending ping" }
     pure $ Stetson.Reply ((PingFrame $ Utf8Binary.toBinary "42") : nil) state
+
   wsInfo message state = do
     liftEffect $ Logger.info { domain: atom "websocket" : atom "info" : nil, type: Logger.Trace }
       { message: "Received info: " <> show message }
     pure $ Stetson.Reply ((TextFrame $ Json.writeJSON message) : nil) state
+
+  handleFrame (TextFrame text) state timerRef = do
+    case Json.readJSON text of
+      Left err -> do
+        liftEffect $ Logger.error
+          { domain: atom "websocket" : atom "frame" : nil, type: Logger.Trace }
+          { message: "Failed to parse frame: ", error: err }
+        pure $ Stetson.NoReply $ WebsocketState state
+      Right (clientMessage :: ClientMessage) -> do
+        handleClientMessage clientMessage state timerRef
+  handleFrame (PingFrame binary) state timerRef =
+    pure $ Stetson.Reply ((PongFrame binary) : nil) $ WebsocketState $ state
+      { pingTimerRef = Just timerRef }
+  handleFrame _otherFrame state timerRef =
+    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
+
+  handleClientMessage (SetUsername { username }) state timerRef = do
+    liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+      { message: "Set username: " <> username }
+    pid <- self
+    liftEffect $ User.subscribe username pid EventMessage
+    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
 schedulePingMessage :: forall m. HasSelf m ServerMessage => MonadEffect m => m TimerRef
 schedulePingMessage = Timer.sendAfter (Milliseconds 25_000.0) SendPing

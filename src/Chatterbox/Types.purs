@@ -7,7 +7,9 @@ import Data.Maybe (Maybe)
 import Data.Newtype (class Newtype)
 import Pinto.Timer (TimerRef)
 
-newtype WebsocketState = WebsocketState { lastPing :: Maybe Int, pingTimerRef :: Maybe TimerRef }
+newtype WebsocketState = WebsocketState WebsocketStateData
+
+type WebsocketStateData = { lastPing :: Maybe Int, pingTimerRef :: Maybe TimerRef }
 
 derive instance newtypeWebsocketState :: Newtype WebsocketState _
 

@@ -19,10 +19,10 @@ import Pinto.Supervisor
 import Pinto.Supervisor.SimpleOneForOne as Supervisor
 import Pinto.Types (RegistryName(..), RegistryReference(..), StartLinkResult)
 
-serverName :: RegistryName (Supervisor.SupervisorType User.Arguments User.Pid)
+serverName :: forall s. RegistryName (Supervisor.SupervisorType User.Arguments (User.Pid s))
 serverName = Local $ atom "Chatterbox.User.Supervisor"
 
-startLink :: Effect (StartLinkResult (Supervisor.SupervisorPid User.Arguments User.Pid))
+startLink :: forall s. Effect (StartLinkResult (Supervisor.SupervisorPid User.Arguments (User.Pid s)))
 startLink =
   Supervisor.startLink (Just $ Local $ atom "Chatterbox.User.Supervisor") $ pure init
   where
@@ -34,5 +34,5 @@ startLink =
   start = User.startLink
   shutdownStrategy = ShutdownTimeout $ Milliseconds 5000.0
 
-startUser :: User.Arguments -> Effect User.Pid
+startUser :: forall s. User.Arguments -> Effect (User.Pid s)
 startUser args = crashIfChildNotRunning <$> Supervisor.startChild (ByName serverName) args
