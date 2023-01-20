@@ -155,7 +155,7 @@ layout content =
   body = H.body {} [ H.script { src: "/static/app.js", async: true } [], content ]
 
 indexPage :: Html
-indexPage = layout $ H.div {} [ H.h1 {} [ H.text "Chatterbox" ] ]
+indexPage = layout $ H.div {} []
 
 htmlWriter :: Tuple2 String (Req -> Html -> Effect (RestResult IOData Html))
 htmlWriter = tuple2 "text/html" $ \r s ->
