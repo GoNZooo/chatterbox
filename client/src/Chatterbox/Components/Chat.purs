@@ -6,23 +6,28 @@ module Chatterbox.Components.Chat
 
 import Prelude
 
+import Chatterbox.Common.Types (ClientMessage(..))
 import Data.Array as Array
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.String (Pattern(..), Replacement(..))
 import Data.String as String
+import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (traverse_)
-import Effect.Aff.Class (class MonadAff)
+import Effect.Aff as Aff
+import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import Simple.JSON as Json
 import Web.Event.Event (Event)
 import Web.Event.Event as Event
 import Web.HTML as Html
 import Web.HTML.Location as Location
 import Web.HTML.Window as Window
+import Web.Socket.ReadyState as ReadyState
 import Web.Socket.WebSocket (WebSocket)
 import Web.Socket.WebSocket as WebSocket
 
@@ -45,7 +50,7 @@ data Action
   = Initialize
   | Finalize
   | SetCurrentMessage String
-  | SendMessage String Event
+  | SendCurrentMessage String Event
 
 component :: forall query m. MonadAff m => H.Component query Input Output m
 component =
@@ -62,7 +67,7 @@ component =
     HH.div_
       [ HH.h1_ [ HH.text "Chatterbox" ]
       , HH.div_ [ HH.textarea [ HP.value $ String.joinWith "\n" messages, HP.readOnly true ] ]
-      , HH.form [ HE.onSubmit \e -> SendMessage currentMessage e ]
+      , HH.form [ HE.onSubmit \e -> SendCurrentMessage currentMessage e ]
           [ HH.input
               [ HP.value currentMessage
               , HP.placeholder "Type a message..."
@@ -75,17 +80,32 @@ component =
   handleAction Initialize = do
     socket <- connectToWebSocket
     modify_ $ _ { socket = Just socket }
+    username <- gets _.username
+    sendSetUsernameOnReady socket username
     pure unit
   handleAction Finalize = do
     socket <- gets _.socket
     liftEffect $ traverse_ WebSocket.close socket
   handleAction (SetCurrentMessage message) =
     modify_ $ _ { currentMessage = message }
-  handleAction (SendMessage message e) = do
+  handleAction (SendCurrentMessage message e) = do
     liftEffect $ Event.preventDefault e
     modify_ $ _ { currentMessage = "" }
     socket <- gets _.socket
-    liftEffect $ traverse_ (\s -> WebSocket.sendString s message) socket
+    liftEffect $
+      traverse_
+        (\s -> { channel: "", message } # SendMessage # Json.writeJSON # WebSocket.sendString s)
+        socket
+
+sendSetUsernameOnReady :: forall m. MonadAff m => WebSocket -> String -> m Unit
+sendSetUsernameOnReady socket username = do
+  readyState <- liftEffect $ WebSocket.readyState socket
+  case readyState of
+    ReadyState.Open -> do
+      { username } # SetUsername # Json.writeJSON # WebSocket.sendString socket # liftEffect
+    _ -> do
+      liftAff $ Aff.delay $ Milliseconds 100.0
+      sendSetUsernameOnReady socket username
 
 connectToWebSocket :: forall m. MonadEffect m => m WebSocket
 connectToWebSocket = do

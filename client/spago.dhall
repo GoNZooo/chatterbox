@@ -13,9 +13,11 @@ to generate this file without the comments in this block.
 { name = "chatterbox-client"
 , dependencies =
   [ "aff"
+  , "arrays"
   , "console"
   , "effect"
   , "either"
+  , "foldable-traversable"
   , "foreign"
   , "halogen"
   , "maybe"
@@ -24,6 +26,9 @@ to generate this file without the comments in this block.
   , "routing"
   , "routing-duplex"
   , "simple-json"
+  , "strings"
+  , "web-events"
+  , "web-html"
   , "web-socket"
   ]
 , packages = ./packages.dhall

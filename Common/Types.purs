@@ -67,20 +67,25 @@ derive instance newtypeHasTypeField :: Newtype HasTypeField _
 instance readForeignHasTypeField :: ReadForeign HasTypeField where
   readImpl f = HasTypeField <$> readImpl f
 
-data ClientMessage = SetUsername { username :: String }
+data ClientMessage
+  = SetUsername { username :: String }
+  | SendMessage { channel :: String, message :: String }
 
 derive instance genericClientMessage :: Generic ClientMessage _
 derive instance eqClientMessage :: Eq ClientMessage
 
 instance showClientMessage :: Show ClientMessage where
   show (SetUsername r) = "SetUsername " <> show r
+  show (SendMessage r) = "SendMessage " <> show r
 
 instance writeForeignClientMessage :: WriteForeign ClientMessage where
   writeImpl (SetUsername { username }) = writeImpl { type: "SetUsername", username }
+  writeImpl (SendMessage { channel, message }) = writeImpl { type: "SendMessage", channel, message }
 
 instance readForeignClientMessage :: ReadForeign ClientMessage where
   readImpl f = do
     HasTypeField { type: t } <- readImpl f
     case t of
       "SetUsername" -> SetUsername <$> readImpl f
+      "SendMessage" -> SendMessage <$> readImpl f
       _ -> fail $ ForeignError $ "Unknown type: " <> t

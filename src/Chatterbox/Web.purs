@@ -143,6 +143,8 @@ websocketHandler =
     pure $ Stetson.Reply ((TextFrame $ Json.writeJSON message) : nil) state
 
   handleFrame (TextFrame text) state timerRef = do
+    liftEffect $ Logger.info { domain: atom "websocket" : atom "text" : nil, type: Logger.Trace }
+      { message: "Received text: " <> text }
     case Json.readJSON text of
       Left err -> do
         liftEffect $ Logger.error
@@ -154,7 +156,11 @@ websocketHandler =
   handleFrame (PingFrame binary) state timerRef =
     pure $ Stetson.Reply ((PongFrame binary) : nil) $ WebsocketState $ state
       { pingTimerRef = Just timerRef }
-  handleFrame _otherFrame state timerRef =
+  handleFrame (PongFrame _) state timerRef =
+    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
+  handleFrame otherFrame state timerRef = do
+    liftEffect $ Logger.warning { domain: atom "websocket" : atom "frame" : nil, type: Logger.Trace }
+      { message: "Received unknown frame: " <> frameToString otherFrame }
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
   handleClientMessage (SetUsername { username }) state timerRef = do
@@ -162,6 +168,11 @@ websocketHandler =
       { message: "Set username: " <> username }
     pid <- self
     liftEffect $ User.subscribe username pid EventMessage
+    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
+  handleClientMessage (SendMessage { message }) state timerRef = do
+    liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+      { message: "Send message: " <> message }
+    -- @TODO: send message to channel from user process
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
 schedulePingMessage :: forall m. HasSelf m ServerMessage => MonadEffect m => m TimerRef
