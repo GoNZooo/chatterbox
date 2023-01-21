@@ -61,7 +61,7 @@ instance writeForeignChannelEvent :: WriteForeign ChannelEvent where
   writeImpl (ChannelJoined { channel, user }) = writeImpl { type: "ChannelJoined", channel, user }
   writeImpl (ChannelLeft { channel, user }) = writeImpl { type: "ChannelLeft", channel, user }
   writeImpl (ChannelMessageSent { channel, user, message }) =
-    writeImpl { type: "ChannelMessage", channel, user, message }
+    writeImpl { type: "ChannelMessageSent", channel, user, message }
 
 newtype User = User String
 
@@ -119,31 +119,27 @@ instance showEvent :: Show Event where
   show (UserLeft r) = "UserLeft " <> show r
 
 data ServerMessage
-  = EchoMessage String
-  | SendPing
-  | UserMessage UserEvent
-  | ChannelMessage ChannelEvent
+  = SendPing
+  | UserMessage { event :: UserEvent }
+  | ChannelMessage { event :: ChannelEvent }
 
 derive instance genericServerMessage :: Generic ServerMessage _
 derive instance eqServerMessage :: Eq ServerMessage
 
 instance showServerMessage :: Show ServerMessage where
-  show (EchoMessage s) = "EchoMessage " <> show s
   show SendPing = "SendPing"
-  show (UserMessage e) = "UserMessage " <> show e
-  show (ChannelMessage e) = "ChannelMessage " <> show e
+  show (UserMessage r) = "UserMessage " <> show r
+  show (ChannelMessage r) = "ChannelMessage " <> show r
 
 instance writeForeignServerMessage :: WriteForeign ServerMessage where
-  writeImpl (EchoMessage s) = writeImpl { type: "EchoMessage", message: s }
   writeImpl SendPing = writeImpl { type: "SendPing" }
-  writeImpl (UserMessage e) = writeImpl { type: "UserMessage", event: e }
-  writeImpl (ChannelMessage e) = writeImpl { type: "ChannelMessage", event: e }
+  writeImpl (UserMessage { event }) = writeImpl { type: "UserMessage", event }
+  writeImpl (ChannelMessage { event }) = writeImpl { type: "ChannelMessage", event }
 
 instance readForeignServerMessage :: ReadForeign ServerMessage where
   readImpl f = do
     HasTypeField { type: t } <- readImpl f
     case t of
-      "EchoMessage" -> EchoMessage <$> readImpl f
       "SendPing" -> pure SendPing
       "UserMessage" -> UserMessage <$> readImpl f
       "ChannelMessage" -> ChannelMessage <$> readImpl f

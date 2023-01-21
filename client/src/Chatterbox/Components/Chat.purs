@@ -6,27 +6,46 @@ module Chatterbox.Components.Chat
 
 import Prelude
 
-import Chatterbox.Common.Types (Channel(..), ClientMessage(..), User)
+import Chatterbox.Common.Types
+  ( Channel(..)
+  , ChannelEvent(..)
+  , ClientMessage(..)
+  , ServerMessage(..)
+  , User
+  )
 import Data.Array as Array
+import Data.Array.NonEmpty as NonEmpty
+import Data.Array.NonEmpty as NonEmptyArray
+import Data.Either (Either(..))
+import Data.List.NonEmpty as NonEmptyList
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.String (Pattern(..), Replacement(..))
 import Data.String as String
 import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (traverse_)
+import Debug as Debug
 import Effect.Aff as Aff
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Class.Console as Console
+import Foreign (typeOf)
+import Foreign as Foreign
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import Halogen.Subscription as HS
+import Simple.JSON (class ReadForeign)
 import Simple.JSON as Json
 import Web.Event.Event (Event)
 import Web.Event.Event as Event
+import Web.Event.EventTarget as EventTarget
 import Web.HTML as Html
 import Web.HTML.Location as Location
 import Web.HTML.Window as Window
+import Web.Socket.Event.EventTypes as WebSocketEventTypes
+import Web.Socket.Event.MessageEvent as MessageEvent
 import Web.Socket.ReadyState as ReadyState
 import Web.Socket.WebSocket (WebSocket)
 import Web.Socket.WebSocket as WebSocket
@@ -41,40 +60,61 @@ derive instance newtypeState :: Newtype State _
 
 type StateRecord =
   { user :: User
-  , messages :: Array String
+  , events :: Array ChannelEvent
   , socket :: Maybe WebSocket
   , currentMessage :: String
+  , webSocketSubscription :: Maybe H.SubscriptionId
   }
 
 data Action
   = Initialize
   | Finalize
-  | SetCurrentMessage String
-  | SendCurrentMessage String Event
+  | SetCurrentMessage { message :: String }
+  | SendCurrentMessage { message :: String, event :: Event }
+  | SocketEvent { event :: ServerMessage }
+
+instance showAction :: Show Action where
+  show Initialize = "Initialize"
+  show Finalize = "Finalize"
+  show (SetCurrentMessage r) = "SetCurrentMessage " <> show r
+  show (SendCurrentMessage { message }) = "SendCurrentMessage " <> show { message, event: "<event>" }
+  show (SocketEvent r) = "SocketEvent " <> show r
 
 component :: forall query m. MonadAff m => H.Component query Input Output m
 component =
   H.mkComponent
     { initialState: \{ user } ->
-        State { user, messages: [], socket: Nothing, currentMessage: "" }
+        State
+          { user, events: [], socket: Nothing, currentMessage: "", webSocketSubscription: Nothing }
     , render
     , eval: H.mkEval $ H.defaultEval
         { handleAction = handleAction, initialize = Just Initialize, finalize = Just Finalize }
     }
   where
   render :: State -> H.ComponentHTML Action () m
-  render (State { messages, currentMessage }) =
+  render (State { events, currentMessage }) =
     HH.div_
       [ HH.h1_ [ HH.text "Chatterbox" ]
-      , HH.div_ [ HH.textarea [ HP.value $ String.joinWith "\n" messages, HP.readOnly true ] ]
-      , HH.form [ HE.onSubmit \e -> SendCurrentMessage currentMessage e ]
+      , HH.div_
+          [ HH.textarea
+              [ events # map renderChannelEvent # String.joinWith "\n" # HP.value
+              , HP.readOnly true
+              ]
+          ]
+      , HH.form [ HE.onSubmit \e -> SendCurrentMessage { message: currentMessage, event: e } ]
           [ HH.input
               [ HP.value currentMessage
               , HP.placeholder "Type a message..."
-              , HE.onValueInput SetCurrentMessage
+              , HE.onValueInput \message -> SetCurrentMessage { message }
               ]
           ]
       ]
+
+  renderChannelEvent :: ChannelEvent -> String
+  renderChannelEvent (ChannelJoined { user, channel }) = unwrap user <> " joined " <> unwrap channel
+  renderChannelEvent (ChannelLeft { user, channel }) = unwrap user <> " left " <> unwrap channel
+  renderChannelEvent (ChannelMessageSent { user, message }) =
+    unwrap user <> ": " <> message
 
   handleAction :: Action -> H.HalogenM State Action () Output m Unit
   handleAction Initialize = do
@@ -82,13 +122,14 @@ component =
     modify_ $ _ { socket = Just socket }
     user <- gets _.user
     sendSetUsernameOnReady socket user
-    pure unit
+    subscription <- subscribeToSocketEvents socket \event -> SocketEvent { event }
+    modify_ $ _ { webSocketSubscription = Just subscription }
   handleAction Finalize = do
     socket <- gets _.socket
     liftEffect $ traverse_ WebSocket.close socket
-  handleAction (SetCurrentMessage message) =
+  handleAction (SetCurrentMessage { message }) =
     modify_ $ _ { currentMessage = message }
-  handleAction (SendCurrentMessage message e) = do
+  handleAction (SendCurrentMessage { message, event: e }) = do
     liftEffect $ Event.preventDefault e
     modify_ $ _ { currentMessage = "" }
     socket <- gets _.socket
@@ -98,6 +139,48 @@ component =
             WebSocket.sendString s
         )
         socket
+  handleAction (SocketEvent { event: ChannelMessage { event } }) = do
+    modify_ $ \s -> s { events = Array.snoc s.events event }
+  handleAction (SocketEvent {}) = do
+    pure unit
+
+subscribeToSocketEvents
+  :: forall m
+   . MonadAff m
+  => WebSocket
+  -> (ServerMessage -> Action)
+  -> H.HalogenM State Action () Output m H.SubscriptionId
+subscribeToSocketEvents socket f = do
+  emitter <- webSocketEmitter socket f
+  H.subscribe emitter
+
+webSocketEmitter
+  :: forall m
+   . MonadAff m
+  => WebSocket
+  -> (ServerMessage -> Action)
+  -> m (HS.Emitter Action)
+webSocketEmitter socket f = do
+  { emitter, listener } <- liftEffect $ HS.create
+  let socketEventTarget = WebSocket.toEventTarget socket
+  eventListener <- liftEffect $ EventTarget.eventListener \e -> do
+    case MessageEvent.fromEvent e of
+      Just messageEvent -> do
+        let data_ = MessageEvent.data_ messageEvent
+        if Foreign.tagOf data_ == "String" then do
+          case data_ # Foreign.unsafeFromForeign # Json.readJSON of
+            Right (message :: ServerMessage) -> do
+              message # f # HS.notify listener # liftEffect
+            Left error -> do
+              Console.error $ NonEmptyList.foldMap Foreign.renderForeignError error
+              pure unit
+        else
+          pure unit
+      Nothing -> do
+        pure unit
+  _ <- liftEffect $
+    EventTarget.addEventListener WebSocketEventTypes.onMessage eventListener false socketEventTarget
+  pure emitter
 
 sendSetUsernameOnReady :: forall m. MonadAff m => WebSocket -> User -> m Unit
 sendSetUsernameOnReady socket user = do

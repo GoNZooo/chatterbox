@@ -136,19 +136,25 @@ websocketHandler =
   wsHandle frame (WebsocketState state@{ pingTimerRef }) = do
     liftEffect $ traverse_ Timer.cancel pingTimerRef
     timerRef <- schedulePingMessage
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "frame" : nil, type: Logger.Trace }
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "Frame" : nil, type: Logger.Trace }
       { message: "Received frame: " <> frameToString frame }
     handleFrame frame state timerRef
 
   -- Like a classic `handle_info`; handles arbitrary messages sent to the process. This will be
   -- used to react to messages that come in from subscriptions.
   wsInfo SendPing state = do
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "ping" : nil, type: Logger.Trace }
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "SendPing" : nil, type: Logger.Trace }
       { message: "Sending ping" }
     pure $ Stetson.Reply ((PingFrame $ Utf8Binary.toBinary "42") : nil) state
 
+  wsInfo (ChannelMessage { event }) state = do
+    liftEffect $ Logger.debug
+      { domain: atom "websocket" : atom "ChannelMessage" : nil, type: Logger.Trace }
+      { message: "Sending channel message" }
+    pure $ Stetson.Reply ((TextFrame $ Json.writeJSON $ ChannelMessage { event }) : nil) state
+
   wsInfo message state = do
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "info" : nil, type: Logger.Trace }
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "info" : nil, type: Logger.Trace }
       { message: "Received info: " <> show message }
     pure $ Stetson.Reply ((TextFrame $ Json.writeJSON message) : nil) state
 
@@ -176,8 +182,9 @@ websocketHandler =
   handleClientMessage (SetUsername { user }) state@{ channels } timerRef = do
     liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Set username: " <> show user }
-    UserBus.subscribe user UserMessage
-    subscriptionRef <- ChannelBus.subscribe (Channel "general") ChannelMessage
+    UserBus.subscribe user \event -> UserMessage { event }
+    subscriptionRef <- ChannelBus.subscribe (Channel "general") \event -> ChannelMessage { event }
+    ChannelBus.send (Channel "general") $ ChannelJoined { user, channel: Channel "general" }
     let newChannels = Map.insert (Channel "general") subscriptionRef channels
     pure $ Stetson.NoReply $ WebsocketState $
       state { user = user, pingTimerRef = Just timerRef, channels = newChannels }
@@ -189,7 +196,7 @@ websocketHandler =
   handleClientMessage (JoinChannel { user, channel }) state timerRef = do
     liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Join channel: " <> show channel }
-    subscriptionRef <- ChannelBus.subscribe channel ChannelMessage
+    subscriptionRef <- ChannelBus.subscribe channel \event -> ChannelMessage { event }
     ChannelBus.send channel $ ChannelJoined { channel, user }
     let newChannels = Map.insert channel subscriptionRef state.channels
     pure $ Stetson.NoReply $ WebsocketState $

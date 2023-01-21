@@ -2,7 +2,7 @@ module Main where
 
 import Prelude hiding ((/))
 
-import Chatterbox.Common.Types (ServerMessage(..), User(..))
+import Chatterbox.Common.Types (User(..))
 import Chatterbox.Components.Chat as Chat
 import Chatterbox.Components.PickUsername as PickUsername
 import Data.Either (hush)
@@ -100,7 +100,6 @@ mainComponent = H.mkComponent { initialState, render, eval }
         , HH.text $ show count
         , HH.button [ HE.onClick \_ -> Increment ] [ HH.text "+" ]
         ]
-    , HH.text $ show $ EchoMessage "Hello"
     ]
   eval = H.mkEval H.defaultEval { handleAction = handleAction }
   handleAction Increment = do
