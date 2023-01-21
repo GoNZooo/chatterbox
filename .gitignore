@@ -29,4 +29,4 @@ output
 .psc-ide-port
 .elixir_ls
 .spago
-priv/static/app.*
+priv/static/app.js*
