@@ -14,8 +14,6 @@ import Chatterbox.Common.Types
   , User
   )
 import Data.Array as Array
-import Data.Array.NonEmpty as NonEmpty
-import Data.Array.NonEmpty as NonEmptyArray
 import Data.Either (Either(..))
 import Data.List.NonEmpty as NonEmptyList
 import Data.Maybe (Maybe(..))
@@ -24,20 +22,18 @@ import Data.String (Pattern(..), Replacement(..))
 import Data.String as String
 import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (traverse_)
-import Debug as Debug
 import Effect.Aff as Aff
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
 import Effect.Class.Console as Console
-import Foreign (typeOf)
 import Foreign as Foreign
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
-import Simple.JSON (class ReadForeign)
 import Simple.JSON as Json
+import Web.DOM.Element as Element
 import Web.Event.Event (Event)
 import Web.Event.Event as Event
 import Web.Event.EventTarget as EventTarget
@@ -49,6 +45,7 @@ import Web.Socket.Event.MessageEvent as MessageEvent
 import Web.Socket.ReadyState as ReadyState
 import Web.Socket.WebSocket (WebSocket)
 import Web.Socket.WebSocket as WebSocket
+import Web.HTML.HTMLElement as HtmlElement
 
 type Input = { user :: User }
 
@@ -93,12 +90,14 @@ component =
   where
   render :: State -> H.ComponentHTML Action () m
   render (State { events, currentMessage }) =
-    HH.div_
+    HH.div [ "chat-window" # wrap # HP.class_ ]
       [ HH.h1_ [ HH.text "Chatterbox" ]
       , HH.div_
           [ HH.textarea
               [ events # map renderChannelEvent # String.joinWith "\n" # HP.value
               , HP.readOnly true
+              , "message-box" # wrap # HP.class_
+              , "message-box" # wrap # HP.ref
               ]
           ]
       , HH.form [ HE.onSubmit \e -> SendCurrentMessage { message: currentMessage, event: e } ]
@@ -139,10 +138,20 @@ component =
             WebSocket.sendString s
         )
         socket
+    scrollMessagesToBottom
   handleAction (SocketEvent { event: ChannelMessage { event } }) = do
     modify_ $ \s -> s { events = Array.snoc s.events event }
+    scrollMessagesToBottom
   handleAction (SocketEvent {}) = do
     pure unit
+
+  scrollMessagesToBottom = do
+    messageBox <- "message-box" # wrap # H.getHTMLElementRef
+    liftEffect $ traverse_ (HtmlElement.toElement >>> scrollToBottom) messageBox
+
+  scrollToBottom e = do
+    scrollHeight <- Element.scrollHeight e
+    Element.setScrollTop scrollHeight e
 
 subscribeToSocketEvents
   :: forall m

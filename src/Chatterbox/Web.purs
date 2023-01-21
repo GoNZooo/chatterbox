@@ -222,7 +222,7 @@ layout :: Html -> Html
 layout content =
   H.html5 head body
   where
-  head = H.head []
+  head = H.head [ H.link { rel: "stylesheet", href: "/static/app.css" } ]
   body = H.body {} [ H.script { src: "/static/app.js", async: true } [], content ]
 
 indexPage :: Html
