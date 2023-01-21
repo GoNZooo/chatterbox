@@ -92,19 +92,23 @@ component =
   render (State { events, currentMessage }) =
     HH.div [ "chat-window" # wrap # HP.class_ ]
       [ HH.h1_ [ HH.text "Chatterbox" ]
-      , HH.div_
+      , HH.div [ "chat-components" # wrap # HP.class_ ]
           [ HH.textarea
               [ events # map renderChannelEvent # String.joinWith "\n" # HP.value
               , HP.readOnly true
               , "message-box" # wrap # HP.class_
               , "message-box" # wrap # HP.ref
               ]
-          ]
-      , HH.form [ HE.onSubmit \e -> SendCurrentMessage { message: currentMessage, event: e } ]
-          [ HH.input
-              [ HP.value currentMessage
-              , HP.placeholder "Type a message..."
-              , HE.onValueInput \message -> SetCurrentMessage { message }
+          , HH.form
+              [ HE.onSubmit \e -> SendCurrentMessage { message: currentMessage, event: e }
+              , "message-form" # wrap # HP.class_
+              ]
+              [ HH.input
+                  [ HP.value currentMessage
+                  , HP.placeholder "Type a message..."
+                  , HE.onValueInput \message -> SetCurrentMessage { message }
+                  , HP.autofocus true
+                  ]
               ]
           ]
       ]
