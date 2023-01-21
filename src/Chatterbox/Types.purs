@@ -2,19 +2,35 @@ module Chatterbox.Types where
 
 import Prelude
 
+import Chatterbox.Common.Types (Channel, User)
 import Data.Generic.Rep (class Generic)
+import Data.Map (Map)
 import Data.Maybe (Maybe)
 import Data.Newtype (class Newtype)
 import Pinto.Timer (TimerRef)
+import SimpleBus (SubscriptionRef)
+
+data ChatProcessName
+  = UserProcess User
+  | ChannelProcess Channel
+
+derive instance genericChatProcessName :: Generic ChatProcessName _
+derive instance eqChatProcessName :: Eq ChatProcessName
+derive instance ordChatProcessName :: Ord ChatProcessName
 
 newtype WebsocketState = WebsocketState WebsocketStateData
 
-type WebsocketStateData = { lastPing :: Maybe Int, pingTimerRef :: Maybe TimerRef }
+type WebsocketStateData =
+  { channels :: Map Channel SubscriptionRef
+  , user :: User
+  , lastPing :: Maybe Int
+  , pingTimerRef :: Maybe TimerRef
+  }
 
 derive instance newtypeWebsocketState :: Newtype WebsocketState _
 
 instance showWebsocketState :: Show WebsocketState where
-  show (WebsocketState { lastPing }) = "WebsocketState " <> show { lastPing }
+  show (WebsocketState { user, lastPing }) = "WebsocketState " <> show { user, lastPing }
 
 data ErlangResult l r
   = Error l

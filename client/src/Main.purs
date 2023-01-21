@@ -2,7 +2,7 @@ module Main where
 
 import Prelude hiding ((/))
 
-import Chatterbox.Common.Types (ServerMessage(..))
+import Chatterbox.Common.Types (ServerMessage(..), User(..))
 import Chatterbox.Components.Chat as Chat
 import Chatterbox.Components.PickUsername as PickUsername
 import Data.Either (hush)
@@ -64,7 +64,8 @@ router = H.mkComponent
   render :: State -> H.ComponentHTML Action ChildSlots m
   render { route: PickUsername } =
     HH.slot (Proxy :: _ "pickUsername") unit PickUsername.component {} UsernamePickerOutput
-  render { route: Chat username } = HH.slot_ (Proxy :: _ "chat") unit Chat.component { username }
+  render { route: Chat username } =
+    HH.slot_ (Proxy :: _ "chat") unit Chat.component { user: User username }
 
   handleQuery :: forall a. Query a -> H.HalogenM State Action ChildSlots Void m (Maybe a)
   handleQuery (Navigate newRoute next) = do

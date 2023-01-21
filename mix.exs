@@ -28,7 +28,8 @@ defmodule Chatterbox.MixProject do
       # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
       {:purerlex, "~> 0.4.2"},
       {:jsx, "~> 3.1"},
-      {:cowboy, "~> 2.9.0"}
+      {:cowboy, "~> 2.9.0"},
+      {:gproc, "~> 0.9.0"}
     ]
   end
 end

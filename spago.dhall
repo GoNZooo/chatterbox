@@ -27,6 +27,7 @@ to generate this file without the comments in this block.
   , "erl-logger"
   , "erl-pinto"
   , "erl-process"
+  , "erl-simplebus"
   , "erl-stetson"
   , "erl-test-eunit"
   , "erl-test-eunit-discovery"

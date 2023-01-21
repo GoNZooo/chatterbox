@@ -2,13 +2,21 @@ module Chatterbox.Web where
 
 import Prelude hiding ((/))
 
-import Chatterbox.Common.Types (ServerMessage(..), ClientMessage(..))
+import Chatterbox.Channel as ChannelBus
+import Chatterbox.Common.Types
+  ( Channel(..)
+  , ChannelEvent(..)
+  , ClientMessage(..)
+  , ServerMessage(..)
+  , User(..)
+  )
 import Chatterbox.Types (WebsocketState(..))
-import Chatterbox.User as User
+import Chatterbox.User as UserBus
 import Data.Array as Array
 import Data.Either (Either(..))
 import Data.Foldable (traverse_)
 import Data.Generic.Rep (class Generic)
+import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust)
 import Data.Show.Generic (genericShow)
 import Data.Time.Duration (Milliseconds(..))
@@ -23,7 +31,7 @@ import Erl.Data.Binary.UTF8 as Utf8Binary
 import Erl.Data.List (nil, (:))
 import Erl.Data.Tuple (Tuple2, tuple2)
 import Erl.Kernel.Inet (Port(..), ip4)
-import Erl.Process (class HasSelf, self)
+import Erl.Process (class HasSelf)
 import Html as H
 import Html.Types (Html)
 import Logger as Logger
@@ -109,7 +117,9 @@ indexHandler =
 websocketHandler :: StetsonHandler ServerMessage WebsocketState
 websocketHandler =
   routeHandler
-    { init: \r -> WebSocket.initResult r $ WebsocketState { lastPing: Nothing, pingTimerRef: Nothing }
+    { init: \r ->
+        WebSocket.initResult r $ WebsocketState
+          { channels: Map.empty, user: User "", lastPing: Nothing, pingTimerRef: Nothing }
     , wsInit
     , wsHandle
     , wsInfo
@@ -163,16 +173,33 @@ websocketHandler =
       { message: "Received unknown frame: " <> frameToString otherFrame }
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
-  handleClientMessage (SetUsername { username }) state timerRef = do
+  handleClientMessage (SetUsername { user }) state@{ channels } timerRef = do
     liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
-      { message: "Set username: " <> username }
-    pid <- self
-    liftEffect $ User.subscribe username pid EventMessage
-    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
-  handleClientMessage (SendMessage { message }) state timerRef = do
+      { message: "Set username: " <> show user }
+    UserBus.subscribe user UserMessage
+    subscriptionRef <- ChannelBus.subscribe (Channel "general") ChannelMessage
+    let newChannels = Map.insert (Channel "general") subscriptionRef channels
+    pure $ Stetson.NoReply $ WebsocketState $
+      state { user = user, pingTimerRef = Just timerRef, channels = newChannels }
+  handleClientMessage (SendMessage { channel, message }) state@{ user } timerRef = do
     liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Send message: " <> message }
-    -- @TODO: send message to channel from user process
+    ChannelBus.send channel $ ChannelMessageSent { channel, message, user }
+    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
+  handleClientMessage (JoinChannel { user, channel }) state timerRef = do
+    liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+      { message: "Join channel: " <> show channel }
+    subscriptionRef <- ChannelBus.subscribe channel ChannelMessage
+    ChannelBus.send channel $ ChannelJoined { channel, user }
+    let newChannels = Map.insert channel subscriptionRef state.channels
+    pure $ Stetson.NoReply $ WebsocketState $
+      state { pingTimerRef = Just timerRef, channels = newChannels }
+  handleClientMessage (LeaveChannel { user, channel }) state@{ channels } timerRef = do
+    liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+      { message: "Leave channel: " <> show channel }
+    let maybeSubscriptionRef = Map.lookup channel channels
+    traverse_ ChannelBus.unsubscribe maybeSubscriptionRef
+    ChannelBus.send channel $ ChannelLeft { channel, user }
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
 schedulePingMessage :: forall m. HasSelf m ServerMessage => MonadEffect m => m TimerRef

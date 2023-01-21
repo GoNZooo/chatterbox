@@ -6,7 +6,7 @@ module Chatterbox.Components.Chat
 
 import Prelude
 
-import Chatterbox.Common.Types (ClientMessage(..))
+import Chatterbox.Common.Types (Channel(..), ClientMessage(..), User)
 import Data.Array as Array
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype, unwrap, wrap)
@@ -31,7 +31,7 @@ import Web.Socket.ReadyState as ReadyState
 import Web.Socket.WebSocket (WebSocket)
 import Web.Socket.WebSocket as WebSocket
 
-type Input = { username :: String }
+type Input = { user :: User }
 
 type Output = Void
 
@@ -40,7 +40,7 @@ newtype State = State StateRecord
 derive instance newtypeState :: Newtype State _
 
 type StateRecord =
-  { username :: String
+  { user :: User
   , messages :: Array String
   , socket :: Maybe WebSocket
   , currentMessage :: String
@@ -55,8 +55,8 @@ data Action
 component :: forall query m. MonadAff m => H.Component query Input Output m
 component =
   H.mkComponent
-    { initialState: \{ username } ->
-        State { username, messages: [], socket: Nothing, currentMessage: "" }
+    { initialState: \{ user } ->
+        State { user, messages: [], socket: Nothing, currentMessage: "" }
     , render
     , eval: H.mkEval $ H.defaultEval
         { handleAction = handleAction, initialize = Just Initialize, finalize = Just Finalize }
@@ -80,8 +80,8 @@ component =
   handleAction Initialize = do
     socket <- connectToWebSocket
     modify_ $ _ { socket = Just socket }
-    username <- gets _.username
-    sendSetUsernameOnReady socket username
+    user <- gets _.user
+    sendSetUsernameOnReady socket user
     pure unit
   handleAction Finalize = do
     socket <- gets _.socket
@@ -94,18 +94,20 @@ component =
     socket <- gets _.socket
     liftEffect $
       traverse_
-        (\s -> { channel: "", message } # SendMessage # Json.writeJSON # WebSocket.sendString s)
+        ( \s -> { channel: Channel "general", message } # SendMessage # Json.writeJSON #
+            WebSocket.sendString s
+        )
         socket
 
-sendSetUsernameOnReady :: forall m. MonadAff m => WebSocket -> String -> m Unit
-sendSetUsernameOnReady socket username = do
+sendSetUsernameOnReady :: forall m. MonadAff m => WebSocket -> User -> m Unit
+sendSetUsernameOnReady socket user = do
   readyState <- liftEffect $ WebSocket.readyState socket
   case readyState of
     ReadyState.Open -> do
-      { username } # SetUsername # Json.writeJSON # WebSocket.sendString socket # liftEffect
+      { user } # SetUsername # Json.writeJSON # WebSocket.sendString socket # liftEffect
     _ -> do
       liftAff $ Aff.delay $ Milliseconds 100.0
-      sendSetUsernameOnReady socket username
+      sendSetUsernameOnReady socket user
 
 connectToWebSocket :: forall m. MonadEffect m => m WebSocket
 connectToWebSocket = do
