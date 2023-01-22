@@ -125,7 +125,7 @@ instance showEvent :: Show Event where
 data ServerMessage
   = SendPing
   | UserMessage { event :: UserEvent }
-  | ChannelMessage { event :: ChannelEvent }
+  | ChannelMessage { channel :: Channel, event :: ChannelEvent }
 
 derive instance genericServerMessage :: Generic ServerMessage _
 derive instance eqServerMessage :: Eq ServerMessage
@@ -138,7 +138,8 @@ instance showServerMessage :: Show ServerMessage where
 instance writeForeignServerMessage :: WriteForeign ServerMessage where
   writeImpl SendPing = writeImpl { type: "SendPing" }
   writeImpl (UserMessage { event }) = writeImpl { type: "UserMessage", event }
-  writeImpl (ChannelMessage { event }) = writeImpl { type: "ChannelMessage", event }
+  writeImpl (ChannelMessage { channel, event }) =
+    writeImpl { type: "ChannelMessage", channel, event }
 
 instance readForeignServerMessage :: ReadForeign ServerMessage where
   readImpl f = do

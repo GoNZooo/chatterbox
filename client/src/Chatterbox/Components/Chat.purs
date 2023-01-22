@@ -16,12 +16,15 @@ import Chatterbox.Common.Types
 import Data.Array as Array
 import Data.Either (Either(..), hush)
 import Data.List.NonEmpty as NonEmptyList
+import Data.Map (Map)
+import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.String (Pattern(..), Replacement(..))
 import Data.String as String
 import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (traverse, traverse_)
+import Debug as Debug
 import Effect.Aff as Aff
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
@@ -59,7 +62,8 @@ derive instance newtypeState :: Newtype State _
 
 type StateRecord =
   { user :: User
-  , events :: Array ChannelEvent
+  , events :: Map Channel (Array ChannelEvent)
+  , currentChannel :: Maybe Channel
   , socket :: Maybe WebSocket
   , currentMessage :: String
   , webSocketSubscription :: Maybe H.SubscriptionId
@@ -86,7 +90,13 @@ component =
   H.mkComponent
     { initialState: \{ user } ->
         State
-          { user, events: [], socket: Nothing, currentMessage: "", webSocketSubscription: Nothing }
+          { user
+          , events: Map.empty
+          , socket: Nothing
+          , currentMessage: ""
+          , webSocketSubscription: Nothing
+          , currentChannel: Nothing
+          }
     , render
     , eval: H.mkEval $ H.defaultEval
         { handleAction = handleAction
@@ -97,12 +107,17 @@ component =
     }
   where
   render :: State -> H.ComponentHTML Action () m
-  render (State { events, currentMessage }) =
+  render (State { events, currentMessage, currentChannel }) = do
+    let channelEvents = fromMaybe [] $ currentChannel >>= \c -> Map.lookup c events
     HH.div [ "chat-window" # wrap # HP.class_ ]
       [ HH.h1_ [ HH.text "Chatterbox" ]
+      , HH.h2_ [ currentChannel # map unwrap # fromMaybe "No channel selected" # HH.text ]
       , HH.div [ "chat-components" # wrap # HP.class_ ]
           [ HH.textarea
-              [ events # map renderChannelEvent # String.joinWith "\n" # HP.value
+              [ Debug.trace channelEvents (const channelEvents)
+                  # map renderChannelEvent
+                  # String.joinWith "\n"
+                  # HP.value
               , HP.readOnly true
               , "message-box" # wrap # HP.class_
               , "message-box" # wrap # HP.ref
@@ -136,6 +151,7 @@ component =
     user <- gets _.user
     channelsToJoin <- getChannelsToJoin
     sendInitialCommands socket user channelsToJoin
+    modify_ $ _ { currentChannel = Array.head channelsToJoin }
     subscription <- subscribeToSocketEvents socket \event -> SocketEvent { event }
     modify_ $ _ { webSocketSubscription = Just subscription }
   handleAction Finalize = do
@@ -154,8 +170,9 @@ component =
         )
         socket
     scrollMessagesToBottom
-  handleAction (SocketEvent { event: ChannelMessage { event } }) = do
-    modify_ $ \s -> s { events = Array.snoc s.events event }
+  handleAction (SocketEvent { event: ChannelMessage { channel, event } }) = do
+    modify_ $ \s -> s
+      { events = Map.insertWith (<>) channel [ event ] s.events }
     scrollMessagesToBottom
   handleAction (SocketEvent {}) = do
     pure unit

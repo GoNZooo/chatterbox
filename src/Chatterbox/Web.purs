@@ -147,11 +147,12 @@ websocketHandler =
       { message: "Sending ping" }
     pure $ Stetson.Reply ((PingFrame $ Utf8Binary.toBinary "42") : nil) state
 
-  wsInfo (ChannelMessage { event }) state = do
+  wsInfo (ChannelMessage { event, channel }) state = do
     liftEffect $ Logger.debug
       { domain: atom "websocket" : atom "ChannelMessage" : nil, type: Logger.Trace }
       { message: "Sending channel message" }
-    pure $ Stetson.Reply ((TextFrame $ Json.writeJSON $ ChannelMessage { event }) : nil) state
+    pure $ Stetson.Reply ((TextFrame $ Json.writeJSON $ ChannelMessage { event, channel }) : nil)
+      state
 
   wsInfo message state = do
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "info" : nil, type: Logger.Trace }
@@ -220,7 +221,7 @@ websocketHandler =
   handleClientMessage (JoinChannel { user, channel }) state timerRef = do
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Join channel: " <> show channel }
-    subscriptionRef <- ChannelBus.subscribe channel \event -> ChannelMessage { event }
+    subscriptionRef <- ChannelBus.subscribe channel \event -> ChannelMessage { event, channel }
     ChannelBus.send channel $ ChannelJoined { channel, user }
     let newChannels = Map.insert channel subscriptionRef state.channels
     pure $ Stetson.NoReply $ WebsocketState $
