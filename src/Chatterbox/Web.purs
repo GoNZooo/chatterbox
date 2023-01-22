@@ -3,7 +3,7 @@ module Chatterbox.Web where
 import Prelude hiding ((/))
 
 import Chatterbox.Channel as ChannelBus
-import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ClientMessage(..), ServerMessage(..))
+import Chatterbox.Common.Types (ChannelEvent(..), ClientMessage(..), ServerMessage(..))
 import Chatterbox.Types (WebsocketState(..))
 import Chatterbox.User as UserBus
 import Data.Array as Array
@@ -14,6 +14,7 @@ import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust)
 import Data.Show.Generic (genericShow)
 import Data.Time.Duration (Milliseconds(..))
+import Data.Traversable (for_)
 import Effect (Effect)
 import Effect.Class (class MonadEffect, liftEffect)
 import Erl.Atom (atom)
@@ -180,13 +181,14 @@ websocketHandler =
 
   handleClientMessage
     (SetUsername { user })
-    state@{ user: Just oldUser, userSubscriptionRef: oldUserSubscriptionRef }
+    state@{ channels, user: Just oldUser, userSubscriptionRef: oldUserSubscriptionRef }
     timerRef = do
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Set username for existing user: " <> show user }
     traverse_ UserBus.unsubscribe oldUserSubscriptionRef
     userSubscriptionRef <- UserBus.subscribe user \event -> UserMessage { event }
-    ChannelBus.send (Channel "general") $ UserRenamed { oldName: oldUser, newName: user }
+    for_ (Map.keys channels) \c ->
+      ChannelBus.send c $ UserRenamed { oldName: oldUser, newName: user }
     pure $ Stetson.NoReply $ WebsocketState $
       state
         { user = Just user
@@ -196,21 +198,17 @@ websocketHandler =
 
   handleClientMessage
     (SetUsername { user })
-    state@{ channels, user: Nothing, userSubscriptionRef: oldUserSubscriptionRef }
+    state@{ user: Nothing, userSubscriptionRef: oldUserSubscriptionRef }
     timerRef = do
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Set username: " <> show user }
     traverse_ UserBus.unsubscribe oldUserSubscriptionRef
     userSubscriptionRef <- UserBus.subscribe user \event -> UserMessage { event }
-    subscriptionRef <- ChannelBus.subscribe (Channel "general") \event -> ChannelMessage { event }
-    ChannelBus.send (Channel "general") $ ChannelJoined { user, channel: Channel "general" }
-    let newChannels = Map.insert (Channel "general") subscriptionRef channels
     pure $ Stetson.NoReply $ WebsocketState $
       state
         { user = Just user
         , pingTimerRef = Just timerRef
         , userSubscriptionRef = Just userSubscriptionRef
-        , channels = newChannels
         }
 
   handleClientMessage (SendMessage { channel, message }) state@{ user } timerRef = do
@@ -234,7 +232,9 @@ websocketHandler =
     let maybeSubscriptionRef = Map.lookup channel channels
     traverse_ ChannelBus.unsubscribe maybeSubscriptionRef
     ChannelBus.send channel $ ChannelLeft { channel, user }
-    pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
+    let newChannels = Map.delete channel channels
+    pure $ Stetson.NoReply $ WebsocketState $
+      state { pingTimerRef = Just timerRef, channels = newChannels }
 
   terminate _foreign _r (WebsocketState { channels, user: Just user }) = do
     liftEffect $ Logger.debug

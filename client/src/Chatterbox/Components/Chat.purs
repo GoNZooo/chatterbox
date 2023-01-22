@@ -14,14 +14,14 @@ import Chatterbox.Common.Types
   , User
   )
 import Data.Array as Array
-import Data.Either (Either(..))
+import Data.Either (Either(..), hush)
 import Data.List.NonEmpty as NonEmptyList
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap, wrap)
 import Data.String (Pattern(..), Replacement(..))
 import Data.String as String
 import Data.Time.Duration (Milliseconds(..))
-import Data.Traversable (traverse_)
+import Data.Traversable (traverse, traverse_)
 import Effect.Aff as Aff
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
@@ -32,7 +32,7 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
-import Simple.JSON (class ReadForeign)
+import Simple.JSON (class ReadForeign, class WriteForeign)
 import Simple.JSON as Json
 import Web.DOM.Element as Element
 import Web.Event.Event (Event)
@@ -47,6 +47,7 @@ import Web.Socket.Event.MessageEvent as MessageEvent
 import Web.Socket.ReadyState as ReadyState
 import Web.Socket.WebSocket (WebSocket)
 import Web.Socket.WebSocket as WebSocket
+import Web.Storage.Storage as LocalStorage
 
 type Input = { user :: User }
 
@@ -133,7 +134,8 @@ component =
     socket <- connectToWebSocket
     modify_ $ _ { socket = Just socket }
     user <- gets _.user
-    sendSetUsernameOnReady socket user
+    channelsToJoin <- getChannelsToJoin
+    sendInitialCommands socket user channelsToJoin
     subscription <- subscribeToSocketEvents socket \event -> SocketEvent { event }
     modify_ $ _ { webSocketSubscription = Just subscription }
   handleAction Finalize = do
@@ -160,7 +162,7 @@ component =
   handleAction (Receive { user }) = do
     modify_ $ _ { user = user }
     socket <- gets _.socket
-    traverse_ (\s -> sendSetUsernameOnReady s user) socket
+    traverse_ (\s -> sendOnReady s [ SetUsername { user } ]) socket
 
   scrollMessagesToBottom = do
     messageBox <- "message-box" # wrap # H.getHTMLElementRef
@@ -169,6 +171,17 @@ component =
   scrollToBottom e = do
     scrollHeight <- Element.scrollHeight e
     Element.setScrollTop scrollHeight e
+
+getChannelsToJoin :: forall m. MonadAff m => m (Array Channel)
+getChannelsToJoin = do
+  window <- liftEffect Html.window
+  storage <- liftEffect $ Window.localStorage window
+  maybeChannelsString <- storage # LocalStorage.getItem "chatterbox-auto-join" # liftEffect
+  maybeChannelsString
+    # traverse (Json.readJSON >>> hush)
+    # join
+    # fromMaybe [ Channel "general" ]
+    # pure
 
 subscribeToSocketEvents
   :: forall m message action state output childSlots
@@ -210,15 +223,20 @@ webSocketEmitter socket f = do
     EventTarget.addEventListener WebSocketEventTypes.onMessage eventListener false socketEventTarget
   pure emitter
 
-sendSetUsernameOnReady :: forall m. MonadAff m => WebSocket -> User -> m Unit
-sendSetUsernameOnReady socket user = do
+sendInitialCommands :: forall m. MonadAff m => WebSocket -> User -> Array Channel -> m Unit
+sendInitialCommands socket user channels = do
+  let channelJoins = map (\channel -> JoinChannel { user, channel }) channels
+  [ [ SetUsername { user } ], channelJoins ] # Array.fold # sendOnReady socket
+
+sendOnReady :: forall m a. MonadAff m => WriteForeign a => WebSocket -> Array a -> m Unit
+sendOnReady socket messages = do
   readyState <- liftEffect $ WebSocket.readyState socket
   case readyState of
     ReadyState.Open -> do
-      { user } # SetUsername # Json.writeJSON # WebSocket.sendString socket # liftEffect
+      traverse_ (Json.writeJSON >>> WebSocket.sendString socket >>> liftEffect) messages
     _ -> do
-      liftAff $ Aff.delay $ Milliseconds 100.0
-      sendSetUsernameOnReady socket user
+      liftAff $ Aff.delay $ Milliseconds 25.0
+      sendOnReady socket messages
 
 connectToWebSocket :: forall m. MonadEffect m => m WebSocket
 connectToWebSocket = do

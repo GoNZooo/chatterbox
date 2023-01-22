@@ -23,6 +23,7 @@ to generate this file without the comments in this block.
   , "foreign"
   , "halogen"
   , "halogen-subscriptions"
+  , "lists"
   , "maybe"
   , "newtype"
   , "prelude"
@@ -30,9 +31,11 @@ to generate this file without the comments in this block.
   , "routing-duplex"
   , "simple-json"
   , "strings"
+  , "web-dom"
   , "web-events"
   , "web-html"
   , "web-socket"
+  , "web-storage"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs", "test/**/*.purs", "../Common/**/*.purs" ]
