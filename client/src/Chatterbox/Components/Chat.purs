@@ -20,6 +20,7 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Set as Set
 import Data.String (Pattern(..), Replacement(..))
 import Data.String as String
 import Data.Time.Duration (Milliseconds(..))
@@ -75,6 +76,7 @@ data Action
   | SetCurrentMessage { message :: String }
   | SendCurrentMessage { message :: String, event :: Event }
   | SocketEvent { event :: ServerMessage }
+  | SelectChannel { channel :: Channel }
 
 instance showAction :: Show Action where
   show Initialize = "Initialize"
@@ -83,6 +85,7 @@ instance showAction :: Show Action where
   show (SetCurrentMessage r) = "SetCurrentMessage " <> show r
   show (SendCurrentMessage { message }) = "SendCurrentMessage " <> show { message, event: "<event>" }
   show (SocketEvent r) = "SocketEvent " <> show r
+  show (SelectChannel r) = "SelectChannel " <> show r
 
 component :: forall query m. MonadAff m => H.Component query Input Output m
 component =
@@ -111,6 +114,8 @@ component =
     HH.div [ "chat-window" # wrap # HP.class_ ]
       [ HH.h1_ [ HH.text "Chatterbox" ]
       , HH.h2_ [ currentChannel # map unwrap # fromMaybe "No channel selected" # HH.text ]
+      , HH.div [ "channel-select-box" # wrap # HP.class_ ] $
+          map renderSelectChannel (events # Map.keys # Set.toUnfoldable)
       , HH.div [ "chat-components" # wrap # HP.class_ ]
           [ HH.textarea
               [ channelEvents
@@ -142,6 +147,14 @@ component =
     unwrap user <> ": " <> message
   renderChannelEvent (UserRenamed { oldName, newName }) =
     unwrap oldName <> " is now known as " <> unwrap newName
+
+  renderSelectChannel :: Channel -> H.ComponentHTML Action () m
+  renderSelectChannel channel =
+    HH.button
+      [ HE.onClick \_ -> SelectChannel { channel }
+      , "channel-select-button" # wrap # HP.class_
+      ]
+      [ channel # unwrap # HH.text ]
 
   handleAction :: Action -> H.HalogenM State Action () Output m Unit
   handleAction Initialize = do
@@ -179,6 +192,9 @@ component =
     modify_ $ _ { user = user }
     socket <- gets _.socket
     traverse_ (\s -> sendOnReady s [ SetUsername { user } ]) socket
+  handleAction (SelectChannel { channel }) = do
+    modify_ $ _ { currentChannel = Just channel }
+    scrollMessagesToBottom
 
   scrollMessagesToBottom = do
     messageBox <- "message-box" # wrap # H.getHTMLElementRef
