@@ -123,6 +123,7 @@ websocketHandler =
     , wsInit
     , wsHandle
     , wsInfo
+    , terminate
     }
   where
   wsInit (WebsocketState state) = do
@@ -132,7 +133,6 @@ websocketHandler =
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
   -- Handles messages from the client that is connected to the websocket
-  wsHandle :: _
   wsHandle frame (WebsocketState state@{ pingTimerRef }) = do
     liftEffect $ traverse_ Timer.cancel pingTimerRef
     timerRef <- schedulePingMessage
@@ -208,6 +208,12 @@ websocketHandler =
     traverse_ ChannelBus.unsubscribe maybeSubscriptionRef
     ChannelBus.send channel $ ChannelLeft { channel, user }
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
+
+  terminate _foreign _r (WebsocketState { channels, user }) = do
+    liftEffect $ Logger.info { domain: atom "websocket" : atom "terminate" : nil, type: Logger.Trace }
+      { message: "Terminating websocket" }
+    traverse_ (\channel -> ChannelBus.send channel $ ChannelLeft { channel, user }) $
+      Map.keys channels
 
 schedulePingMessage :: forall m. HasSelf m ServerMessage => MonadEffect m => m TimerRef
 schedulePingMessage = Timer.sendAfter (Milliseconds 25_000.0) SendPing
