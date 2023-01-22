@@ -32,12 +32,14 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
+import Simple.JSON (class ReadForeign)
 import Simple.JSON as Json
 import Web.DOM.Element as Element
 import Web.Event.Event (Event)
 import Web.Event.Event as Event
 import Web.Event.EventTarget as EventTarget
 import Web.HTML as Html
+import Web.HTML.HTMLElement as HtmlElement
 import Web.HTML.Location as Location
 import Web.HTML.Window as Window
 import Web.Socket.Event.EventTypes as WebSocketEventTypes
@@ -45,7 +47,6 @@ import Web.Socket.Event.MessageEvent as MessageEvent
 import Web.Socket.ReadyState as ReadyState
 import Web.Socket.WebSocket (WebSocket)
 import Web.Socket.WebSocket as WebSocket
-import Web.HTML.HTMLElement as HtmlElement
 
 type Input = { user :: User }
 
@@ -66,6 +67,7 @@ type StateRecord =
 data Action
   = Initialize
   | Finalize
+  | Receive Input
   | SetCurrentMessage { message :: String }
   | SendCurrentMessage { message :: String, event :: Event }
   | SocketEvent { event :: ServerMessage }
@@ -73,6 +75,7 @@ data Action
 instance showAction :: Show Action where
   show Initialize = "Initialize"
   show Finalize = "Finalize"
+  show (Receive input) = "Receive " <> show input
   show (SetCurrentMessage r) = "SetCurrentMessage " <> show r
   show (SendCurrentMessage { message }) = "SendCurrentMessage " <> show { message, event: "<event>" }
   show (SocketEvent r) = "SocketEvent " <> show r
@@ -85,7 +88,11 @@ component =
           { user, events: [], socket: Nothing, currentMessage: "", webSocketSubscription: Nothing }
     , render
     , eval: H.mkEval $ H.defaultEval
-        { handleAction = handleAction, initialize = Just Initialize, finalize = Just Finalize }
+        { handleAction = handleAction
+        , initialize = Just Initialize
+        , finalize = Just Finalize
+        , receive = Receive >>> Just
+        }
     }
   where
   render :: State -> H.ComponentHTML Action () m
@@ -118,6 +125,8 @@ component =
   renderChannelEvent (ChannelLeft { user, channel }) = unwrap user <> " left " <> unwrap channel
   renderChannelEvent (ChannelMessageSent { user, message }) =
     unwrap user <> ": " <> message
+  renderChannelEvent (UserRenamed { oldName, newName }) =
+    unwrap oldName <> " is now known as " <> unwrap newName
 
   handleAction :: Action -> H.HalogenM State Action () Output m Unit
   handleAction Initialize = do
@@ -148,6 +157,10 @@ component =
     scrollMessagesToBottom
   handleAction (SocketEvent {}) = do
     pure unit
+  handleAction (Receive { user }) = do
+    modify_ $ _ { user = user }
+    socket <- gets _.socket
+    traverse_ (\s -> sendSetUsernameOnReady s user) socket
 
   scrollMessagesToBottom = do
     messageBox <- "message-box" # wrap # H.getHTMLElementRef
@@ -158,21 +171,23 @@ component =
     Element.setScrollTop scrollHeight e
 
 subscribeToSocketEvents
-  :: forall m
+  :: forall m message action state output childSlots
    . MonadAff m
+  => ReadForeign message
   => WebSocket
-  -> (ServerMessage -> Action)
-  -> H.HalogenM State Action () Output m H.SubscriptionId
+  -> (message -> action)
+  -> H.HalogenM state action childSlots output m H.SubscriptionId
 subscribeToSocketEvents socket f = do
   emitter <- webSocketEmitter socket f
   H.subscribe emitter
 
 webSocketEmitter
-  :: forall m
+  :: forall m message action
    . MonadAff m
+  => ReadForeign message
   => WebSocket
-  -> (ServerMessage -> Action)
-  -> m (HS.Emitter Action)
+  -> (message -> action)
+  -> m (HS.Emitter action)
 webSocketEmitter socket f = do
   { emitter, listener } <- liftEffect $ HS.create
   let socketEventTarget = WebSocket.toEventTarget socket
@@ -182,7 +197,7 @@ webSocketEmitter socket f = do
         let data_ = MessageEvent.data_ messageEvent
         if Foreign.tagOf data_ == "String" then do
           case data_ # Foreign.unsafeFromForeign # Json.readJSON of
-            Right (message :: ServerMessage) -> do
+            Right message -> do
               message # f # HS.notify listener # liftEffect
             Left error -> do
               Console.error $ NonEmptyList.foldMap Foreign.renderForeignError error

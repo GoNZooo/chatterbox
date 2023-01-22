@@ -3,13 +3,7 @@ module Chatterbox.Web where
 import Prelude hiding ((/))
 
 import Chatterbox.Channel as ChannelBus
-import Chatterbox.Common.Types
-  ( Channel(..)
-  , ChannelEvent(..)
-  , ClientMessage(..)
-  , ServerMessage(..)
-  , User(..)
-  )
+import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ClientMessage(..), ServerMessage(..))
 import Chatterbox.Types (WebsocketState(..))
 import Chatterbox.User as UserBus
 import Data.Array as Array
@@ -119,7 +113,12 @@ websocketHandler =
   routeHandler
     { init: \r ->
         WebSocket.initResult r $ WebsocketState
-          { channels: Map.empty, user: User "", lastPing: Nothing, pingTimerRef: Nothing }
+          { channels: Map.empty
+          , user: Nothing
+          , lastPing: Nothing
+          , pingTimerRef: Nothing
+          , userSubscriptionRef: Nothing
+          }
     , wsInit
     , wsHandle
     , wsInfo
@@ -127,7 +126,7 @@ websocketHandler =
     }
   where
   wsInit (WebsocketState state) = do
-    liftEffect $ Logger.info { domain: atom "ws" : atom "init" : nil, type: Logger.Trace }
+    liftEffect $ Logger.debug { domain: atom "ws" : atom "init" : nil, type: Logger.Trace }
       { message: "Websocket init" }
     timerRef <- schedulePingMessage
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
@@ -159,7 +158,7 @@ websocketHandler =
     pure $ Stetson.Reply ((TextFrame $ Json.writeJSON message) : nil) state
 
   handleFrame (TextFrame text) state timerRef = do
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "text" : nil, type: Logger.Trace }
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "text" : nil, type: Logger.Trace }
       { message: "Received text: " <> text }
     case Json.readJSON text of
       Left err -> do
@@ -179,41 +178,72 @@ websocketHandler =
       { message: "Received unknown frame: " <> frameToString otherFrame }
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
-  handleClientMessage (SetUsername { user }) state@{ channels } timerRef = do
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+  handleClientMessage
+    (SetUsername { user })
+    state@{ user: Just oldUser, userSubscriptionRef: oldUserSubscriptionRef }
+    timerRef = do
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+      { message: "Set username for existing user: " <> show user }
+    traverse_ UserBus.unsubscribe oldUserSubscriptionRef
+    userSubscriptionRef <- UserBus.subscribe user \event -> UserMessage { event }
+    ChannelBus.send (Channel "general") $ UserRenamed { oldName: oldUser, newName: user }
+    pure $ Stetson.NoReply $ WebsocketState $
+      state
+        { user = Just user
+        , userSubscriptionRef = Just userSubscriptionRef
+        , pingTimerRef = Just timerRef
+        }
+
+  handleClientMessage
+    (SetUsername { user })
+    state@{ channels, user: Nothing, userSubscriptionRef: oldUserSubscriptionRef }
+    timerRef = do
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Set username: " <> show user }
-    UserBus.subscribe user \event -> UserMessage { event }
+    traverse_ UserBus.unsubscribe oldUserSubscriptionRef
+    userSubscriptionRef <- UserBus.subscribe user \event -> UserMessage { event }
     subscriptionRef <- ChannelBus.subscribe (Channel "general") \event -> ChannelMessage { event }
     ChannelBus.send (Channel "general") $ ChannelJoined { user, channel: Channel "general" }
     let newChannels = Map.insert (Channel "general") subscriptionRef channels
     pure $ Stetson.NoReply $ WebsocketState $
-      state { user = user, pingTimerRef = Just timerRef, channels = newChannels }
+      state
+        { user = Just user
+        , pingTimerRef = Just timerRef
+        , userSubscriptionRef = Just userSubscriptionRef
+        , channels = newChannels
+        }
+
   handleClientMessage (SendMessage { channel, message }) state@{ user } timerRef = do
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Send message: " <> message }
-    ChannelBus.send channel $ ChannelMessageSent { channel, message, user }
+    traverse_ (\u -> ChannelBus.send channel $ ChannelMessageSent { channel, message, user: u }) user
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
+
   handleClientMessage (JoinChannel { user, channel }) state timerRef = do
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Join channel: " <> show channel }
     subscriptionRef <- ChannelBus.subscribe channel \event -> ChannelMessage { event }
     ChannelBus.send channel $ ChannelJoined { channel, user }
     let newChannels = Map.insert channel subscriptionRef state.channels
     pure $ Stetson.NoReply $ WebsocketState $
       state { pingTimerRef = Just timerRef, channels = newChannels }
+
   handleClientMessage (LeaveChannel { user, channel }) state@{ channels } timerRef = do
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
+    liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Leave channel: " <> show channel }
     let maybeSubscriptionRef = Map.lookup channel channels
     traverse_ ChannelBus.unsubscribe maybeSubscriptionRef
     ChannelBus.send channel $ ChannelLeft { channel, user }
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
-  terminate _foreign _r (WebsocketState { channels, user }) = do
-    liftEffect $ Logger.info { domain: atom "websocket" : atom "terminate" : nil, type: Logger.Trace }
+  terminate _foreign _r (WebsocketState { channels, user: Just user }) = do
+    liftEffect $ Logger.debug
+      { domain: atom "websocket" : atom "terminate" : nil, type: Logger.Trace }
       { message: "Terminating websocket" }
     traverse_ (\channel -> ChannelBus.send channel $ ChannelLeft { channel, user }) $
       Map.keys channels
+  terminate _foreign _r (WebsocketState { user: Nothing }) = do
+    pure unit
 
 schedulePingMessage :: forall m. HasSelf m ServerMessage => MonadEffect m => m TimerRef
 schedulePingMessage = Timer.sendAfter (Milliseconds 25_000.0) SendPing

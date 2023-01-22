@@ -22,7 +22,8 @@ newtype WebsocketState = WebsocketState WebsocketStateData
 
 type WebsocketStateData =
   { channels :: Map Channel SubscriptionRef
-  , user :: User
+  , user :: Maybe User
+  , userSubscriptionRef :: Maybe SubscriptionRef
   , lastPing :: Maybe Int
   , pingTimerRef :: Maybe TimerRef
   }

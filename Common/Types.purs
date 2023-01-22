@@ -38,6 +38,7 @@ data ChannelEvent
   = ChannelJoined { channel :: Channel, user :: User }
   | ChannelLeft { channel :: Channel, user :: User }
   | ChannelMessageSent { channel :: Channel, user :: User, message :: String }
+  | UserRenamed { oldName :: User, newName :: User }
 
 derive instance genericChannelEvent :: Generic ChannelEvent _
 derive instance eqChannelEvent :: Eq ChannelEvent
@@ -47,6 +48,7 @@ instance showChannelEvent :: Show ChannelEvent where
   show (ChannelJoined r) = "ChannelJoined " <> show r
   show (ChannelLeft r) = "ChannelLeft " <> show r
   show (ChannelMessageSent r) = "ChannelMessageSent " <> show r
+  show (UserRenamed r) = "UserRenamed " <> show r
 
 instance readForeignChannelEvent :: ReadForeign ChannelEvent where
   readImpl f = do
@@ -55,6 +57,7 @@ instance readForeignChannelEvent :: ReadForeign ChannelEvent where
       "ChannelJoined" -> ChannelJoined <$> readImpl f
       "ChannelLeft" -> ChannelLeft <$> readImpl f
       "ChannelMessageSent" -> ChannelMessageSent <$> readImpl f
+      "UserRenamed" -> UserRenamed <$> readImpl f
       _ -> fail $ ForeignError $ "Invalid tag for ChannelEvent: " <> t
 
 instance writeForeignChannelEvent :: WriteForeign ChannelEvent where
@@ -62,6 +65,7 @@ instance writeForeignChannelEvent :: WriteForeign ChannelEvent where
   writeImpl (ChannelLeft { channel, user }) = writeImpl { type: "ChannelLeft", channel, user }
   writeImpl (ChannelMessageSent { channel, user, message }) =
     writeImpl { type: "ChannelMessageSent", channel, user, message }
+  writeImpl (UserRenamed { oldName, newName }) = writeImpl { type: "UserRenamed", oldName, newName }
 
 newtype User = User String
 
