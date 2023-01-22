@@ -174,13 +174,16 @@ component =
 
 getChannelsToJoin :: forall m. MonadAff m => m (Array Channel)
 getChannelsToJoin = do
+  fromMaybe [ Channel "general" ] <$> getFromLocalStorage "chatterbox-auto-join"
+
+getFromLocalStorage :: forall m a. MonadAff m => ReadForeign a => String -> m (Maybe a)
+getFromLocalStorage key = do
   window <- liftEffect Html.window
   storage <- liftEffect $ Window.localStorage window
-  maybeChannelsString <- storage # LocalStorage.getItem "chatterbox-auto-join" # liftEffect
-  maybeChannelsString
+  maybeItem <- storage # LocalStorage.getItem key # liftEffect
+  maybeItem
     # traverse (Json.readJSON >>> hush)
     # join
-    # fromMaybe [ Channel "general" ]
     # pure
 
 subscribeToSocketEvents
