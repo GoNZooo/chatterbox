@@ -24,7 +24,6 @@ import Data.String (Pattern(..), Replacement(..))
 import Data.String as String
 import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (traverse, traverse_)
-import Debug as Debug
 import Effect.Aff as Aff
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect, liftEffect)
@@ -114,7 +113,7 @@ component =
       , HH.h2_ [ currentChannel # map unwrap # fromMaybe "No channel selected" # HH.text ]
       , HH.div [ "chat-components" # wrap # HP.class_ ]
           [ HH.textarea
-              [ Debug.trace channelEvents (const channelEvents)
+              [ channelEvents
                   # map renderChannelEvent
                   # String.joinWith "\n"
                   # HP.value
