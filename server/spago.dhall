@@ -55,6 +55,6 @@ to generate this file without the comments in this block.
   , "unsafe-coerce"
   ]
 , packages = ./packages.dhall
-, sources = [ "src/**/*.purs", "test/**/*.purs", "Common/**/*.purs" ]
+, sources = [ "src/**/*.purs", "test/**/*.purs", "../Common/**/*.purs" ]
 , backend = "purerl"
 }
