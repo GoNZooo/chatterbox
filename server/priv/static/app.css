@@ -58,3 +58,19 @@ body {
   margin-top: 1rem;
   width: 100%;
 }
+
+.join-message {
+  color: green;
+}
+
+.leave-message {
+  color: red;
+}
+
+.rename-message {
+  color: blue;
+}
+
+.chat-user {
+  font-weight: bold;
+}
