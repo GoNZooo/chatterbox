@@ -117,15 +117,7 @@ component =
       , HH.div [ "channel-select-box" # wrap # HP.class_ ] $
           map renderSelectChannel (events # Map.keys # Set.toUnfoldable)
       , HH.div [ "chat-components" # wrap # HP.class_ ]
-          [ HH.textarea
-              [ channelEvents
-                  # map renderChannelEvent
-                  # String.joinWith "\n"
-                  # HP.value
-              , HP.readOnly true
-              , "message-box" # wrap # HP.class_
-              , "message-box" # wrap # HP.ref
-              ]
+          [ renderChatMessages channelEvents
           , HH.form
               [ HE.onSubmit \e -> SendCurrentMessage { message: currentMessage, event: e }
               , "message-form" # wrap # HP.class_
@@ -140,13 +132,25 @@ component =
           ]
       ]
 
-  renderChannelEvent :: ChannelEvent -> String
-  renderChannelEvent (ChannelJoined { user, channel }) = unwrap user <> " joined " <> unwrap channel
-  renderChannelEvent (ChannelLeft { user, channel }) = unwrap user <> " left " <> unwrap channel
+  renderChatMessages :: forall slots. Array ChannelEvent -> H.ComponentHTML Action slots m
+  renderChatMessages events =
+    HH.pre
+      [ "message-box" # wrap # HP.class_, "message-box" # wrap # HP.ref ] $
+      events # map renderChannelEvent
+
+  renderChannelEvent :: forall slots. ChannelEvent -> H.ComponentHTML Action slots m
+  renderChannelEvent (ChannelJoined { user, channel }) =
+    HH.div [ "join-message" # wrap # HP.class_ ]
+      [ renderUser user, HH.text $ " joined " <> unwrap channel ]
+  renderChannelEvent (ChannelLeft { user, channel }) =
+    HH.div [ "leave-message" # wrap # HP.class_ ]
+      [ renderUser user, HH.text $ " left " <> unwrap channel ]
   renderChannelEvent (ChannelMessageSent { user, message }) =
-    unwrap user <> ": " <> message
+    HH.div [ "chat-message" # wrap # HP.class_ ]
+      [ renderUser user, HH.text $ ": " <> message ]
   renderChannelEvent (UserRenamed { oldName, newName }) =
-    unwrap oldName <> " is now known as " <> unwrap newName
+    HH.div [ "rename-message" # wrap # HP.class_ ]
+      [ renderUser oldName, HH.text $ " is now known as ", renderUser newName ]
 
   renderSelectChannel :: Channel -> H.ComponentHTML Action () m
   renderSelectChannel channel =
@@ -155,6 +159,9 @@ component =
       , "channel-select-button" # wrap # HP.class_
       ]
       [ channel # unwrap # HH.text ]
+
+  renderUser :: forall slots. User -> H.ComponentHTML Action slots m
+  renderUser user = HH.span [ "chat-user" # wrap # HP.class_ ] [ HH.text $ unwrap user ]
 
   handleAction :: Action -> H.HalogenM State Action () Output m Unit
   handleAction Initialize = do
