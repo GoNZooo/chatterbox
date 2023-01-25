@@ -10,3 +10,6 @@ export const requestPermission_ = (onError, onSuccess) => {
   };
 };
 
+export const createNotification_ = (title, body, data) => {
+  return new Notification(title, {body, data});
+};
