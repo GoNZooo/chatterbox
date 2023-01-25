@@ -1,0 +1,5 @@
+**/output
+server/_build
+.elixir_ls
+server/.spago
+server/deps
