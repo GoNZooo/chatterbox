@@ -1,0 +1,6 @@
+.elixir_ls
+.git
+_build
+.spago
+output
+deps
