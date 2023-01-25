@@ -27,6 +27,7 @@ to generate this file without the comments in this block.
   , "maybe"
   , "newtype"
   , "ordered-collections"
+  , "partial"
   , "prelude"
   , "routing"
   , "routing-duplex"
