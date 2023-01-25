@@ -13,7 +13,6 @@ import Effect.Aff as Aff
 import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect)
 import Effect.Class as Effect
-import Effect.Class.Console as Console
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.HTML as HH
@@ -78,8 +77,7 @@ router = H.mkComponent
 
   handleAction :: Action -> H.HalogenM State Action ChildSlots Void m Unit
   handleAction Initialize = do
-    notificationPermission <- liftAff Notifications.requestPermission
-    Console.logShow notificationPermission
+    _notificationPermission <- liftAff Notifications.requestPermission
     initialRoute <-
       (RoutingDuplex.parse routeCodec >>> hush) <$> Effect.liftEffect RoutingHash.getHash
     initialRoute # fromMaybe PickUsername # navigate
