@@ -6,8 +6,9 @@ module Chatterbox.Components.Chat
 
 import Prelude
 
-import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ClientMessage(..), ServerMessage(..), User)
 import Chatterbox.Components.Settings as Settings
+import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ServerMessage(..), User)
+import Chatterbox.Common.Types as ClientMessage
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Data.Array as Array
 import Data.Either (Either(..), hush)
@@ -75,20 +76,28 @@ data Action
   | Finalize
   | Receive Input
   | SetCurrentMessage { message :: String }
-  | SendCurrentMessage { message :: String, event :: Event }
+  | SendCurrentMessage { message :: String }
   | SocketEvent { event :: ServerMessage }
   | SelectChannel { channel :: Channel }
   | SettingsOutput Settings.Output
+  | SubmitTextInput { input :: String, event :: Event }
+  | JoinChannel { channel :: Channel }
+  | LeaveChannel { channel :: Channel }
+  | ChangeUser { user :: User }
 
 instance showAction :: Show Action where
   show Initialize = "Initialize"
   show Finalize = "Finalize"
   show (Receive input) = "Receive " <> show input
   show (SetCurrentMessage r) = "SetCurrentMessage " <> show r
-  show (SendCurrentMessage { message }) = "SendCurrentMessage " <> show { message, event: "<event>" }
+  show (SendCurrentMessage { message }) = "SendCurrentMessage " <> show { message }
   show (SocketEvent r) = "SocketEvent " <> show r
   show (SelectChannel r) = "SelectChannel " <> show r
   show (SettingsOutput r) = "SettingsOutput " <> show r
+  show (SubmitTextInput { input }) = "SubmitTextInput " <> show { input, event: "<event>" }
+  show (JoinChannel r) = "JoinChannel " <> show r
+  show (LeaveChannel r) = "LeaveChannel " <> show r
+  show (ChangeUser r) = "ChangeUser " <> show r
 
 component :: forall query m. MonadAff m => H.Component query Input Output m
 component =
@@ -123,7 +132,7 @@ component =
       , HH.div [ "chat-components" # wrap # HP.class_ ]
           [ renderChatMessages channelEvents
           , HH.form
-              [ HE.onSubmit \e -> SendCurrentMessage { message: currentMessage, event: e }
+              [ HE.onSubmit \e -> SubmitTextInput { input: currentMessage, event: e }
               , "message-form" # wrap # HP.class_
               ]
               [ HH.input
@@ -167,7 +176,7 @@ component =
   renderUser :: forall slots. User -> H.ComponentHTML Action slots m
   renderUser user = HH.span [ "chat-user" # wrap # HP.class_ ] [ HH.text $ unwrap user ]
 
-  handleAction :: forall slots. Action -> H.HalogenM State Action () Output m Unit
+  handleAction :: forall slots. Action -> H.HalogenM State Action slots Output m Unit
   handleAction Initialize = do
     socket <- connectToWebSocket
     modify_ $ _ { socket = Just socket }
@@ -182,15 +191,20 @@ component =
     liftEffect $ traverse_ WebSocket.close socket
   handleAction (SetCurrentMessage { message }) =
     modify_ $ _ { currentMessage = message }
-  handleAction (SendCurrentMessage { message, event: e }) = do
-    liftEffect $ Event.preventDefault e
+  handleAction (SendCurrentMessage { message }) = do
     modify_ $ _ { currentMessage = "" }
     { socket: maybeSocket, currentChannel: maybeChannel } <- get
     void $ runMaybeT do
       socket <- MaybeT $ pure maybeSocket
       channel <- MaybeT $ pure maybeChannel
-      { channel, message } # SendMessage # Json.writeJSON # sendString socket
+      { channel, message } # ClientMessage.SendMessage # sendString socket
     scrollMessagesToBottom
+  handleAction (SocketEvent { event: ChannelMessage { event: ChannelLeft { user, channel } } }) = do
+    { user: ourUser, currentChannel, events } <- get
+    when (user == ourUser) do
+      modify_ $ _ { events = Map.delete channel events }
+    when (currentChannel == Just channel) do
+      modify_ $ _ { currentChannel = events # Map.keys # Array.fromFoldable # Array.head }
   handleAction (SocketEvent { event: ChannelMessage { channel, event } }) = do
     modify_ $ \s -> s
       { events = Map.insertWith (<>) channel [ event ] s.events }
@@ -200,7 +214,7 @@ component =
   handleAction (Receive { user }) = do
     modify_ $ _ { user = user }
     socket <- gets _.socket
-    traverse_ (\s -> sendOnReady s [ SetUsername { user } ]) socket
+    traverse_ (\s -> sendOnReady s [ ClientMessage.SetUsername { user } ]) socket
   handleAction (SelectChannel { channel }) = do
     modify_ $ _ { currentChannel = Just channel }
     scrollMessagesToBottom
@@ -208,7 +222,57 @@ component =
     let user = wrap username
     modify_ $ _ { user = user }
     socket <- gets _.socket
-    traverse_ (\s -> sendOnReady s [ SetUsername { user } ]) socket
+    traverse_ (\s -> sendOnReady s [ ClientMessage.SetUsername { user } ]) socket
+  handleAction (SubmitTextInput { input, event: e }) = do
+    liftEffect $ Event.preventDefault e
+    modify_ _ { currentMessage = "" }
+    user <- gets _.user
+    let actions = interpretInput user input
+    traverse_ handleAction actions
+  handleAction (JoinChannel { channel }) = do
+    { socket: maybeSocket, user } <- get
+    traverse_ (\s -> sendOnReady s [ ClientMessage.JoinChannel { channel, user } ]) maybeSocket
+    modify_ $ _ { currentChannel = Just channel }
+    scrollMessagesToBottom
+  handleAction (LeaveChannel { channel }) = do
+    { socket: maybeSocket, user } <- get
+    traverse_ (\s -> sendOnReady s [ ClientMessage.LeaveChannel { channel, user } ]) maybeSocket
+  handleAction (ChangeUser { user }) = do
+    { socket: maybeSocket } <- get
+    traverse_ (\s -> sendOnReady s [ ClientMessage.SetUsername { user } ]) maybeSocket
+    modify_ $ _ { user = user }
+
+  interpretInput :: User -> String -> Array Action
+  interpretInput _user input = do
+    let
+      splits = String.split (Pattern " ") input
+      command = Array.head splits
+      arguments = splits # Array.tail # fromMaybe []
+    case command of
+      Just "/join" -> arguments # parseJoinChannel # map JoinChannel # Array.fromFoldable
+      Just "/j" -> arguments # parseJoinChannel # map JoinChannel # Array.fromFoldable
+      Just "/leave" -> arguments # parseLeaveChannel # map LeaveChannel # Array.fromFoldable
+      Just "/l" -> arguments # parseLeaveChannel # map LeaveChannel # Array.fromFoldable
+      Just "/nick" -> arguments # parseChangeUser # map ChangeUser # Array.fromFoldable
+      Just "/name" -> arguments # parseChangeUser # map ChangeUser # Array.fromFoldable
+      Just "/username" -> arguments # parseChangeUser # map ChangeUser # Array.fromFoldable
+      Just "/user" -> arguments # parseChangeUser # map ChangeUser # Array.fromFoldable
+      _ -> [ SendCurrentMessage { message: input } ]
+
+  parseJoinChannel :: Array String -> Maybe { channel :: Channel }
+  parseJoinChannel arguments = do
+    channel <- Array.head arguments
+    pure { channel: wrap channel }
+
+  parseLeaveChannel :: Array String -> Maybe { channel :: Channel }
+  parseLeaveChannel arguments = do
+    channel <- Array.head arguments
+    pure { channel: wrap channel }
+
+  parseChangeUser :: Array String -> Maybe { user :: User }
+  parseChangeUser arguments = do
+    user <- Array.head arguments
+    pure { user: wrap user }
 
   scrollMessagesToBottom :: forall slots. H.HalogenM State Action slots Output m Unit
   scrollMessagesToBottom = do
@@ -275,8 +339,8 @@ webSocketEmitter socket f = do
 
 sendInitialCommands :: forall m. MonadAff m => WebSocket -> User -> Array Channel -> m Unit
 sendInitialCommands socket user channels = do
-  let channelJoins = map (\channel -> JoinChannel { user, channel }) channels
-  [ [ SetUsername { user } ], channelJoins ] # Array.fold # sendOnReady socket
+  let channelJoins = map (\channel -> ClientMessage.JoinChannel { user, channel }) channels
+  [ [ ClientMessage.SetUsername { user } ], channelJoins ] # Array.fold # sendOnReady socket
 
 sendString :: forall m a. MonadEffect m => WriteForeign a => WebSocket -> a -> m Unit
 sendString socket a = do
@@ -287,7 +351,7 @@ sendOnReady socket messages = do
   readyState <- liftEffect $ WebSocket.readyState socket
   case readyState of
     ReadyState.Open -> do
-      traverse_ (Json.writeJSON >>> sendString socket) messages
+      traverse_ (sendString socket) messages
     _ -> do
       liftAff $ Aff.delay $ Milliseconds 25.0
       sendOnReady socket messages
