@@ -231,9 +231,9 @@ websocketHandler =
   handleClientMessage (LeaveChannel { user, channel }) state@{ channels } timerRef = do
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Leave channel: " <> show channel }
+    ChannelBus.send channel $ ChannelLeft { channel, user }
     let maybeSubscriptionRef = Map.lookup channel channels
     traverse_ ChannelBus.unsubscribe maybeSubscriptionRef
-    ChannelBus.send channel $ ChannelLeft { channel, user }
     let newChannels = Map.delete channel channels
     pure $ Stetson.NoReply $ WebsocketState $
       state { pingTimerRef = Just timerRef, channels = newChannels }
