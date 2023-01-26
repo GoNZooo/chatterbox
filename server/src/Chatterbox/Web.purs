@@ -12,6 +12,7 @@ import Data.Foldable (traverse_)
 import Data.Generic.Rep (class Generic)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromJust)
+import Data.Newtype (unwrap)
 import Data.Show.Generic (genericShow)
 import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (for_)
@@ -150,7 +151,7 @@ websocketHandler =
   wsInfo (ChannelMessage { event, channel }) state = do
     liftEffect $ Logger.debug
       { domain: atom "websocket" : atom "ChannelMessage" : nil, type: Logger.Trace }
-      { message: "Sending channel message" }
+      { message: "Sending channel message: " <> show event <> " in " <> unwrap channel }
     pure $ Stetson.Reply ((TextFrame $ Json.writeJSON $ ChannelMessage { event, channel }) : nil)
       state
 
@@ -214,7 +215,7 @@ websocketHandler =
 
   handleClientMessage (SendMessage { channel, message }) state@{ user } timerRef = do
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
-      { message: "Send message: " <> message }
+      { message: "Send message: " <> message <> " to channel: " <> unwrap channel }
     traverse_ (\u -> ChannelBus.send channel $ ChannelMessageSent { channel, message, user: u }) user
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
