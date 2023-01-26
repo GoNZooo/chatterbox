@@ -6,13 +6,8 @@ module Chatterbox.Components.Chat
 
 import Prelude
 
-import Chatterbox.Common.Types
-  ( Channel(..)
-  , ChannelEvent(..)
-  , ClientMessage(..)
-  , ServerMessage(..)
-  , User
-  )
+import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ClientMessage(..), ServerMessage(..), User)
+import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Data.Array as Array
 import Data.Either (Either(..), hush)
 import Data.List.NonEmpty as NonEmptyList
@@ -181,13 +176,11 @@ component =
   handleAction (SendCurrentMessage { message, event: e }) = do
     liftEffect $ Event.preventDefault e
     modify_ $ _ { currentMessage = "" }
-    socket <- gets _.socket
-    liftEffect $
-      traverse_
-        ( \s -> { channel: Channel "general", message } # SendMessage # Json.writeJSON #
-            WebSocket.sendString s
-        )
-        socket
+    { socket: maybeSocket, currentChannel: maybeChannel } <- get
+    void $ runMaybeT do
+      socket <- MaybeT $ pure maybeSocket
+      channel <- MaybeT $ pure maybeChannel
+      { channel, message } # SendMessage # Json.writeJSON # WebSocket.sendString socket # liftEffect
     scrollMessagesToBottom
   handleAction (SocketEvent { event: ChannelMessage { channel, event } }) = do
     modify_ $ \s -> s
@@ -291,6 +284,9 @@ modify_ f = H.modify_ (unwrap >>> f >>> wrap)
 
 gets :: forall m state r a. Newtype state r => (r -> a) -> H.HalogenM state Action () Output m a
 gets f = H.gets (unwrap >>> f)
+
+get :: forall m state r. Newtype state r => H.HalogenM state Action () Output m r
+get = H.gets unwrap
 
 getOrigin :: forall m. MonadEffect m => m String
 getOrigin = liftEffect $ Html.window >>= Window.location >>= Location.origin
