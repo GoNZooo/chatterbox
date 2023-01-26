@@ -107,3 +107,13 @@ in  upstream
       , repo = "https://github.com/id3as/purescript-erl-simplebus.git"
       , version = "551cb2e110f70bf470825d0912c06c48e71867bc"
       }
+  with routing-duplex =
+      { dependencies = upstream.routing-duplex.dependencies
+      , repo = "https://github.com/natefaubion/purescript-routing-duplex.git"
+      , version = "v0.7.0"
+      }
+  with js-uri =
+     { dependencies = upstream.js-uri.dependencies
+     , repo = "https://github.com/GoNZooo/purescript-js-uri.git"
+     , version = "v2.0.0-erl1-a"
+     }

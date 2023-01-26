@@ -8,6 +8,7 @@ import Prelude
 
 import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ClientMessage(..), ServerMessage(..), User)
 import Chatterbox.Components.Settings as Settings
+import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Data.Array as Array
 import Data.Either (Either(..), hush)
 import Data.List.NonEmpty as NonEmptyList
@@ -120,15 +121,7 @@ component =
       , HH.div [ "channel-select-box" # wrap # HP.class_ ] $
           map renderSelectChannel (events # Map.keys # Set.toUnfoldable)
       , HH.div [ "chat-components" # wrap # HP.class_ ]
-          [ HH.textarea
-              [ channelEvents
-                  # map renderChannelEvent
-                  # String.joinWith "\n"
-                  # HP.value
-              , HP.readOnly true
-              , "message-box" # wrap # HP.class_
-              , "message-box" # wrap # HP.ref
-              ]
+          [ renderChatMessages channelEvents
           , HH.form
               [ HE.onSubmit \e -> SendCurrentMessage { message: currentMessage, event: e }
               , "message-form" # wrap # HP.class_
@@ -143,13 +136,25 @@ component =
           ]
       ]
 
-  renderChannelEvent :: ChannelEvent -> String
-  renderChannelEvent (ChannelJoined { user, channel }) = unwrap user <> " joined " <> unwrap channel
-  renderChannelEvent (ChannelLeft { user, channel }) = unwrap user <> " left " <> unwrap channel
+  renderChatMessages :: forall slots. Array ChannelEvent -> H.ComponentHTML Action slots m
+  renderChatMessages events =
+    HH.pre
+      [ "message-box" # wrap # HP.class_, "message-box" # wrap # HP.ref ] $
+      events # map renderChannelEvent
+
+  renderChannelEvent :: forall slots. ChannelEvent -> H.ComponentHTML Action slots m
+  renderChannelEvent (ChannelJoined { user, channel }) =
+    HH.div [ "join-message" # wrap # HP.class_ ]
+      [ renderUser user, HH.text $ " joined " <> unwrap channel ]
+  renderChannelEvent (ChannelLeft { user, channel }) =
+    HH.div [ "leave-message" # wrap # HP.class_ ]
+      [ renderUser user, HH.text $ " left " <> unwrap channel ]
   renderChannelEvent (ChannelMessageSent { user, message }) =
-    unwrap user <> ": " <> message
+    HH.div [ "chat-message" # wrap # HP.class_ ]
+      [ renderUser user, HH.text $ ": " <> message ]
   renderChannelEvent (UserRenamed { oldName, newName }) =
-    unwrap oldName <> " is now known as " <> unwrap newName
+    HH.div [ "rename-message" # wrap # HP.class_ ]
+      [ renderUser oldName, HH.text $ " is now known as ", renderUser newName ]
 
   renderSelectChannel :: forall slots. Channel -> H.ComponentHTML Action slots m
   renderSelectChannel channel =
@@ -159,7 +164,10 @@ component =
       ]
       [ channel # unwrap # HH.text ]
 
-  handleAction :: forall slots. Action -> H.HalogenM State Action slots Output m Unit
+  renderUser :: forall slots. User -> H.ComponentHTML Action slots m
+  renderUser user = HH.span [ "chat-user" # wrap # HP.class_ ] [ HH.text $ unwrap user ]
+
+  handleAction :: forall slots. Action -> H.HalogenM State Action () Output m Unit
   handleAction Initialize = do
     socket <- connectToWebSocket
     modify_ $ _ { socket = Just socket }
@@ -177,13 +185,11 @@ component =
   handleAction (SendCurrentMessage { message, event: e }) = do
     liftEffect $ Event.preventDefault e
     modify_ $ _ { currentMessage = "" }
-    socket <- gets _.socket
-    liftEffect $
-      traverse_
-        ( \s -> { channel: Channel "general", message } # SendMessage # Json.writeJSON #
-            WebSocket.sendString s
-        )
-        socket
+    { socket: maybeSocket, currentChannel: maybeChannel } <- get
+    void $ runMaybeT do
+      socket <- MaybeT $ pure maybeSocket
+      channel <- MaybeT $ pure maybeChannel
+      { channel, message } # SendMessage # Json.writeJSON # sendString socket
     scrollMessagesToBottom
   handleAction (SocketEvent { event: ChannelMessage { channel, event } }) = do
     modify_ $ \s -> s
@@ -272,12 +278,16 @@ sendInitialCommands socket user channels = do
   let channelJoins = map (\channel -> JoinChannel { user, channel }) channels
   [ [ SetUsername { user } ], channelJoins ] # Array.fold # sendOnReady socket
 
+sendString :: forall m a. MonadEffect m => WriteForeign a => WebSocket -> a -> m Unit
+sendString socket a = do
+  a # Json.writeJSON # WebSocket.sendString socket # liftEffect
+
 sendOnReady :: forall m a. MonadAff m => WriteForeign a => WebSocket -> Array a -> m Unit
 sendOnReady socket messages = do
   readyState <- liftEffect $ WebSocket.readyState socket
   case readyState of
     ReadyState.Open -> do
-      traverse_ (Json.writeJSON >>> WebSocket.sendString socket >>> liftEffect) messages
+      traverse_ (Json.writeJSON >>> sendString socket) messages
     _ -> do
       liftAff $ Aff.delay $ Milliseconds 25.0
       sendOnReady socket messages
@@ -293,6 +303,9 @@ modify_ f = H.modify_ (unwrap >>> f >>> wrap)
 
 gets :: forall m state r a slots. Newtype state r => (r -> a) -> H.HalogenM state Action slots Output m a
 gets f = H.gets (unwrap >>> f)
+
+get :: forall m state r slots. Newtype state r => H.HalogenM state Action slots Output m r
+get = H.gets unwrap
 
 getOrigin :: forall m. MonadEffect m => m String
 getOrigin = liftEffect $ Html.window >>= Window.location >>= Location.origin

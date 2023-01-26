@@ -10,13 +10,12 @@ import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Effect (Effect)
 import Effect.Aff as Aff
-import Effect.Aff.Class (class MonadAff)
+import Effect.Aff.Class (class MonadAff, liftAff)
 import Effect.Class (class MonadEffect)
 import Effect.Class as Effect
 import Halogen as H
 import Halogen.Aff as HA
 import Halogen.HTML as HH
-import Halogen.HTML.Events as HE
 import Halogen.VDom.Driver as VDomDriver
 import Routing.Duplex (RouteDuplex')
 import Routing.Duplex as RoutingDuplex
@@ -24,6 +23,7 @@ import Routing.Duplex.Generic as RoutingDuplexGeneric
 import Routing.Duplex.Generic.Syntax ((/))
 import Routing.Hash as RoutingHash
 import Type.Proxy (Proxy(..))
+import Web.Notifications as Notifications
 
 data Query a = Navigate Route a
 
@@ -77,6 +77,7 @@ router = H.mkComponent
 
   handleAction :: Action -> H.HalogenM State Action ChildSlots Void m Unit
   handleAction Initialize = do
+    _notificationPermission <- liftAff Notifications.requestPermission
     initialRoute <-
       (RoutingDuplex.parse routeCodec >>> hush) <$> Effect.liftEffect RoutingHash.getHash
     initialRoute # fromMaybe PickUsername # navigate
@@ -85,29 +86,6 @@ router = H.mkComponent
 
 navigate :: forall m. MonadEffect m => Route -> m Unit
 navigate = RoutingDuplex.print routeCodec >>> RoutingHash.setHash >>> Effect.liftEffect
-
-type ButtonState = { count :: Int }
-
-data ButtonAction = Increment | Decrement
-
-mainComponent :: forall query input output m. H.Component query input output m
-mainComponent = H.mkComponent { initialState, render, eval }
-  where
-  initialState _ = { count: 0 }
-  render { count } = HH.div_
-    [ HH.div_
-        [ HH.button [ HE.onClick \_ -> Decrement ] [ HH.text "-" ]
-        , HH.text $ show count
-        , HH.button [ HE.onClick \_ -> Increment ] [ HH.text "+" ]
-        ]
-    ]
-  eval = H.mkEval H.defaultEval { handleAction = handleAction }
-  handleAction Increment = do
-    H.modify_ \s -> s { count = s.count + 1 }
-    pure unit
-  handleAction Decrement = do
-    H.modify_ \s -> s { count = s.count - 1 }
-    pure unit
 
 main :: Effect Unit
 main = do
