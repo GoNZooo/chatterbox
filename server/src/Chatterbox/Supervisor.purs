@@ -4,6 +4,7 @@ module Chatterbox.Supervisor
 
 import Prelude
 
+import Chatterbox.ChannelCounter.Supervisor as ChannelCounterSupervisor
 import Chatterbox.Web as Web
 import Data.Maybe (Maybe(..))
 import Data.Time.Duration (Seconds(..))
@@ -20,7 +21,10 @@ startLink = Supervisor.startLink (Just $ Local $ atom "Chatterbox.Supervisor") $
   where
   supervisorSpec = { childSpecs, flags }
   childSpecs = ErlList.fromFoldable
-    [ SupervisorHelpers.worker "Chatterbox.Web" $ Web.startLink {}
+    [ SupervisorHelpers.supervisor
+        "Chatterbox.ChannelCounter.Supervisor"
+        ChannelCounterSupervisor.startLink
+    , SupervisorHelpers.worker "Chatterbox.Web" $ Web.startLink {}
     ]
   flags = { strategy, intensity, period }
   strategy = Supervisor.OneForOne
