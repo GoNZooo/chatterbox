@@ -120,6 +120,7 @@ websocketHandler =
           , lastPing: Nothing
           , pingTimerRef: Nothing
           , userSubscriptionRef: Nothing
+          , users: Map.empty
           }
     , wsInit
     , wsHandle

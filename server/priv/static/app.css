@@ -21,7 +21,6 @@ body {
 .chat-window {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
   padding: 1rem;
   background-color: #fff;
   border: 1px solid #ccc;
@@ -30,16 +29,19 @@ body {
   height: 100%;
   width: 100%;
 }
-
-.chat-window .chat-components {
+.chat-wrapper {
   display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  height: 100%;
-  width: 100%;
+  flex-direction: row;
+  height: 80%;
 }
 
-.chat-window .chat-components .message-box {
+.chat-components {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+}
+
+.chat-components .message-box {
   background-color: #fff;
   flex-grow: 2;
   border: 1px solid #ccc;

@@ -6,9 +6,9 @@ module Chatterbox.Components.Chat
 
 import Prelude
 
-import Chatterbox.Components.Settings as Settings
 import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ServerMessage(..), User)
 import Chatterbox.Common.Types as ClientMessage
+import Chatterbox.Components.Settings as Settings
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Data.Array as Array
 import Data.Either (Either(..), hush)
@@ -69,6 +69,7 @@ type StateRecord =
   , socket :: Maybe WebSocket
   , currentMessage :: String
   , webSocketSubscription :: Maybe H.SubscriptionId
+  , users :: Map Channel (Array User)
   }
 
 data Action
@@ -110,6 +111,7 @@ component =
           , currentMessage: ""
           , webSocketSubscription: Nothing
           , currentChannel: Nothing
+          , users: Map.empty
           }
     , render
     , eval: H.mkEval $ H.defaultEval
@@ -121,27 +123,32 @@ component =
     }
   where
   render :: State -> H.ComponentHTML Action ChildSlots m
-  render (State { events, currentMessage, currentChannel, user }) = do
-    let channelEvents = fromMaybe [] $ currentChannel >>= \c -> Map.lookup c events
+  render (State { events, currentMessage, currentChannel, user, users }) = do
+    let
+      channelEvents = fromMaybe [] $ currentChannel >>= \c -> Map.lookup c events
+      channelUsers = fromMaybe [] $ currentChannel >>= \c -> Map.lookup c users
     HH.div [ "chat-window" # wrap # HP.class_ ]
       [ HH.h1_ [ HH.text "Chatterbox" ]
       , HH.slot _settings unit Settings.component { username: unwrap user } SettingsOutput
       , HH.h2_ [ currentChannel # map unwrap # fromMaybe "No channel selected" # HH.text ]
       , HH.div [ "channel-select-box" # wrap # HP.class_ ] $
           map renderSelectChannel (events # Map.keys # Set.toUnfoldable)
-      , HH.div [ "chat-components" # wrap # HP.class_ ]
-          [ renderChatMessages channelEvents
-          , HH.form
-              [ HE.onSubmit \e -> SubmitTextInput { input: currentMessage, event: e }
-              , "message-form" # wrap # HP.class_
-              ]
-              [ HH.input
-                  [ HP.value currentMessage
-                  , HP.placeholder "Type a message..."
-                  , HE.onValueInput \message -> SetCurrentMessage { message }
-                  , HP.autofocus true
+      , HH.div [ "chat-wrapper" # wrap # HP.class_ ]
+          [ HH.div [ "chat-components" # wrap # HP.class_ ]
+              [ renderChatMessages channelEvents
+              , HH.form
+                  [ HE.onSubmit \e -> SubmitTextInput { input: currentMessage, event: e }
+                  , "message-form" # wrap # HP.class_
+                  ]
+                  [ HH.input
+                      [ HP.value currentMessage
+                      , HP.placeholder "Type a message..."
+                      , HE.onValueInput \message -> SetCurrentMessage { message }
+                      , HP.autofocus true
+                      ]
                   ]
               ]
+          , renderChatUsers channelUsers
           ]
       ]
 
@@ -150,6 +157,13 @@ component =
     HH.pre
       [ "message-box" # wrap # HP.class_, "message-box" # wrap # HP.ref ] $
       events # map renderChannelEvent
+
+  renderChatUsers :: forall slots. Array User -> H.ComponentHTML Action slots m
+  renderChatUsers users =
+    HH.div [ "user-list" # wrap # HP.class_ ]
+      [ HH.h3_ [ HH.text "Users" ]
+      , HH.ul_ $ users # map \user -> HH.li_ [ HH.text $ unwrap user ]
+      ]
 
   renderChannelEvent :: forall slots. ChannelEvent -> H.ComponentHTML Action slots m
   renderChannelEvent (ChannelJoined { user, channel }) =
@@ -199,12 +213,20 @@ component =
       channel <- MaybeT $ pure maybeChannel
       { channel, message } # ClientMessage.SendMessage # sendString socket
     scrollMessagesToBottom
+
+  handleAction (SocketEvent { event: ChannelMessage { event: ChannelJoined { user, channel } } }) = do
+    { users } <- get
+    let newUsersInChannel = Map.insertWith (<>) channel [ user ] users
+    Console.logShow newUsersInChannel
+    modify_ $ _ { users = newUsersInChannel }
   handleAction (SocketEvent { event: ChannelMessage { event: ChannelLeft { user, channel } } }) = do
-    { user: ourUser, currentChannel, events } <- get
+    { user: ourUser, currentChannel, events, users } <- get
     when (user == ourUser) do
       modify_ $ _ { events = Map.delete channel events }
     when (currentChannel == Just channel) do
       modify_ $ _ { currentChannel = events # Map.keys # Array.fromFoldable # Array.head }
+    let newUsersInChannel = Map.alter (map (Array.delete user)) channel users
+    modify_ $ _ { users = newUsersInChannel }
   handleAction (SocketEvent { event: ChannelMessage { channel, event } }) = do
     modify_ $ \s -> s
       { events = Map.insertWith (<>) channel [ event ] s.events }
@@ -223,6 +245,8 @@ component =
     modify_ $ _ { user = user }
     socket <- gets _.socket
     traverse_ (\s -> sendOnReady s [ ClientMessage.SetUsername { user } ]) socket
+  handleAction (SubmitTextInput { input: "", event: e }) = do
+    liftEffect $ Event.preventDefault e
   handleAction (SubmitTextInput { input, event: e }) = do
     liftEffect $ Event.preventDefault e
     modify_ _ { currentMessage = "" }
