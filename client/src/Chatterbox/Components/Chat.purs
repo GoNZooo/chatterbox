@@ -180,7 +180,7 @@ component =
     void $ runMaybeT do
       socket <- MaybeT $ pure maybeSocket
       channel <- MaybeT $ pure maybeChannel
-      { channel, message } # SendMessage # Json.writeJSON # WebSocket.sendString socket # liftEffect
+      { channel, message } # SendMessage # Json.writeJSON # sendString socket
     scrollMessagesToBottom
   handleAction (SocketEvent { event: ChannelMessage { channel, event } }) = do
     modify_ $ \s -> s
@@ -263,12 +263,16 @@ sendInitialCommands socket user channels = do
   let channelJoins = map (\channel -> JoinChannel { user, channel }) channels
   [ [ SetUsername { user } ], channelJoins ] # Array.fold # sendOnReady socket
 
+sendString :: forall m a. MonadEffect m => WriteForeign a => WebSocket -> a -> m Unit
+sendString socket a = do
+  a # Json.writeJSON # WebSocket.sendString socket # liftEffect
+
 sendOnReady :: forall m a. MonadAff m => WriteForeign a => WebSocket -> Array a -> m Unit
 sendOnReady socket messages = do
   readyState <- liftEffect $ WebSocket.readyState socket
   case readyState of
     ReadyState.Open -> do
-      traverse_ (Json.writeJSON >>> WebSocket.sendString socket >>> liftEffect) messages
+      traverse_ (Json.writeJSON >>> sendString socket) messages
     _ -> do
       liftAff $ Aff.delay $ Milliseconds 25.0
       sendOnReady socket messages
