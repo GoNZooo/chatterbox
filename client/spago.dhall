@@ -33,6 +33,7 @@ to generate this file without the comments in this block.
   , "routing-duplex"
   , "simple-json"
   , "strings"
+  , "transformers"
   , "web-dom"
   , "web-events"
   , "web-html"
