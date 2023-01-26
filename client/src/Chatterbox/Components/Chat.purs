@@ -6,13 +6,8 @@ module Chatterbox.Components.Chat
 
 import Prelude
 
-import Chatterbox.Common.Types
-  ( Channel(..)
-  , ChannelEvent(..)
-  , ClientMessage(..)
-  , ServerMessage(..)
-  , User
-  )
+import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ClientMessage(..), ServerMessage(..), User)
+import Chatterbox.Components.Settings as Settings
 import Data.Array as Array
 import Data.Either (Either(..), hush)
 import Data.List.NonEmpty as NonEmptyList
@@ -37,6 +32,7 @@ import Halogen.HTML.Properties as HP
 import Halogen.Subscription as HS
 import Simple.JSON (class ReadForeign, class WriteForeign)
 import Simple.JSON as Json
+import Type.Proxy (Proxy(..))
 import Web.DOM.Element as Element
 import Web.Event.Event (Event)
 import Web.Event.Event as Event
@@ -56,9 +52,13 @@ type Input = { user :: User }
 
 type Output = Void
 
+type ChildSlots = (settings :: forall query. H.Slot query Settings.Output Unit)
+
 newtype State = State StateRecord
 
 derive instance newtypeState :: Newtype State _
+
+_settings = Proxy :: Proxy "settings"
 
 type StateRecord =
   { user :: User
@@ -77,6 +77,7 @@ data Action
   | SendCurrentMessage { message :: String, event :: Event }
   | SocketEvent { event :: ServerMessage }
   | SelectChannel { channel :: Channel }
+  | SettingsOutput Settings.Output
 
 instance showAction :: Show Action where
   show Initialize = "Initialize"
@@ -86,6 +87,7 @@ instance showAction :: Show Action where
   show (SendCurrentMessage { message }) = "SendCurrentMessage " <> show { message, event: "<event>" }
   show (SocketEvent r) = "SocketEvent " <> show r
   show (SelectChannel r) = "SelectChannel " <> show r
+  show (SettingsOutput r) = "SettingsOutput " <> show r
 
 component :: forall query m. MonadAff m => H.Component query Input Output m
 component =
@@ -108,11 +110,12 @@ component =
         }
     }
   where
-  render :: State -> H.ComponentHTML Action () m
-  render (State { events, currentMessage, currentChannel }) = do
+  render :: State -> H.ComponentHTML Action ChildSlots m
+  render (State { events, currentMessage, currentChannel, user }) = do
     let channelEvents = fromMaybe [] $ currentChannel >>= \c -> Map.lookup c events
     HH.div [ "chat-window" # wrap # HP.class_ ]
       [ HH.h1_ [ HH.text "Chatterbox" ]
+      , HH.slot _settings unit Settings.component { username: unwrap user } SettingsOutput
       , HH.h2_ [ currentChannel # map unwrap # fromMaybe "No channel selected" # HH.text ]
       , HH.div [ "channel-select-box" # wrap # HP.class_ ] $
           map renderSelectChannel (events # Map.keys # Set.toUnfoldable)
@@ -148,7 +151,7 @@ component =
   renderChannelEvent (UserRenamed { oldName, newName }) =
     unwrap oldName <> " is now known as " <> unwrap newName
 
-  renderSelectChannel :: Channel -> H.ComponentHTML Action () m
+  renderSelectChannel :: forall slots. Channel -> H.ComponentHTML Action slots m
   renderSelectChannel channel =
     HH.button
       [ HE.onClick \_ -> SelectChannel { channel }
@@ -156,7 +159,7 @@ component =
       ]
       [ channel # unwrap # HH.text ]
 
-  handleAction :: Action -> H.HalogenM State Action () Output m Unit
+  handleAction :: forall slots. Action -> H.HalogenM State Action slots Output m Unit
   handleAction Initialize = do
     socket <- connectToWebSocket
     modify_ $ _ { socket = Just socket }
@@ -195,7 +198,13 @@ component =
   handleAction (SelectChannel { channel }) = do
     modify_ $ _ { currentChannel = Just channel }
     scrollMessagesToBottom
+  handleAction (SettingsOutput { username }) = do
+    let user = wrap username
+    modify_ $ _ { user = user }
+    socket <- gets _.socket
+    traverse_ (\s -> sendOnReady s [ SetUsername { user } ]) socket
 
+  scrollMessagesToBottom :: forall slots. H.HalogenM State Action slots Output m Unit
   scrollMessagesToBottom = do
     messageBox <- "message-box" # wrap # H.getHTMLElementRef
     liftEffect $ traverse_ (HtmlElement.toElement >>> scrollToBottom) messageBox
@@ -279,10 +288,10 @@ connectToWebSocket = do
   let url = Array.fold [ String.replace (Pattern "http") (Replacement "ws") baseUrl, "/ws" ]
   liftEffect $ WebSocket.create url []
 
-modify_ :: forall m r state. Newtype state r => (r -> r) -> H.HalogenM state Action () Output m Unit
+modify_ :: forall m r state slots. Newtype state r => (r -> r) -> H.HalogenM state Action slots Output m Unit
 modify_ f = H.modify_ (unwrap >>> f >>> wrap)
 
-gets :: forall m state r a. Newtype state r => (r -> a) -> H.HalogenM state Action () Output m a
+gets :: forall m state r a slots. Newtype state r => (r -> a) -> H.HalogenM state Action slots Output m a
 gets f = H.gets (unwrap >>> f)
 
 getOrigin :: forall m. MonadEffect m => m String
