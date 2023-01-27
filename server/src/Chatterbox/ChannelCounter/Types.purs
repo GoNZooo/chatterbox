@@ -2,15 +2,14 @@ module Chatterbox.ChannelCounter.Types where
 
 import Prelude
 
-import Chatterbox.Common.Types (Channel)
+import Chatterbox.Common.Types (Channel, ChannelEvent, User)
 import Pinto.GenServer (ServerPid)
-import Pinto.Monitor (MonitorMsg)
 
-type Arguments = { channel :: Channel }
+type Arguments = Channel
 
-type State = { channel :: Channel }
+type State = { channel :: Channel, users :: Array User }
 
-data Message = MonitorDown MonitorMsg
+type Message = ChannelEvent
 
 type Pid = ServerPid Unit Unit Message State
 

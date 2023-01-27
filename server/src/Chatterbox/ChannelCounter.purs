@@ -7,6 +7,7 @@ module Chatterbox.ChannelCounter
 
 import Prelude
 
+import Chatterbox.Channel as ChannelBus
 import Chatterbox.ChannelCounter.Types (Arguments, Message, State, Pid)
 import Chatterbox.Common.Types (Channel)
 import Chatterbox.Names as Names
@@ -15,7 +16,7 @@ import Effect (Effect)
 import Erl.Atom (atom)
 import Erl.Data.Tuple (tuple2)
 import Foreign as Foreign
-import Pinto.GenServer (InitResult(..), ServerPid, ServerType)
+import Pinto.GenServer (InitResult(..), ServerPid, ServerType, InfoFn)
 import Pinto.GenServer as GenServer
 import Pinto.Supervisor (crashIfChildNotRunning)
 import Pinto.Supervisor.SimpleOneForOne as Supervisor
@@ -27,10 +28,15 @@ serverName channel =
 
 startLink
   :: Arguments -> Effect (StartLinkResult (ServerPid Unit Unit Message State))
-startLink { channel } =
-  GenServer.startLink (GenServer.defaultSpec init) { name = Just $ serverName channel }
+startLink channel =
+  GenServer.startLink (GenServer.defaultSpec init)
+    { name = Just $ serverName channel, handleInfo = Just handleInfo }
   where
-  init = pure $ InitOk $ { channel }
+  handleInfo :: InfoFn Unit Unit Message State
+  handleInfo channelEvent state' = pure $ GenServer.return state'
+  init = do
+    _subscriptionRef <- ChannelBus.subscribe channel identity
+    pure $ InitOk $ { channel, users: mempty }
 
 state :: Channel -> Effect State
 state channel = do
