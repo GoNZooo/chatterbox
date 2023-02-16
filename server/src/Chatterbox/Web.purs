@@ -3,6 +3,7 @@ module Chatterbox.Web where
 import Prelude hiding ((/))
 
 import Chatterbox.Channel as ChannelBus
+import Chatterbox.ChannelCounter as ChannelCounter
 import Chatterbox.Common.Types (ChannelEvent(..), ClientMessage(..), ServerMessage(..))
 import Chatterbox.Types (WebsocketState(..))
 import Chatterbox.User as UserBus
@@ -18,6 +19,7 @@ import Data.Time.Duration (Milliseconds(..))
 import Data.Traversable (for_)
 import Effect (Effect)
 import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Class.Console as Console
 import Erl.Atom (atom)
 import Erl.Cowboy.Handlers.WebSocket (Frame(..))
 import Erl.Cowboy.Req (Req)
@@ -220,24 +222,31 @@ websocketHandler =
     traverse_ (\u -> ChannelBus.send channel $ ChannelMessageSent { channel, message, user: u }) user
     pure $ Stetson.NoReply $ WebsocketState $ state { pingTimerRef = Just timerRef }
 
-  handleClientMessage (JoinChannel { user, channel }) state timerRef = do
+  handleClientMessage (JoinChannel { user, channel }) state@{ users } timerRef = do
+    _pid <- liftEffect $ ChannelCounter.start channel
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Join channel: " <> show channel }
     subscriptionRef <- ChannelBus.subscribe channel \event -> ChannelMessage { event, channel }
     ChannelBus.send channel $ ChannelJoined { channel, user }
+    usersInChannel <- liftEffect $ ChannelCounter.getUsers channel
+    Console.log $ "Users in channel: " <> show usersInChannel
+
+    let newUsers = Map.insert channel usersInChannel users
+    Console.log $ "New users JOIN: " <> show newUsers
     let newChannels = Map.insert channel subscriptionRef state.channels
     pure $ Stetson.NoReply $ WebsocketState $
-      state { pingTimerRef = Just timerRef, channels = newChannels }
+      state { pingTimerRef = Just timerRef, channels = newChannels, users = newUsers }
 
-  handleClientMessage (LeaveChannel { user, channel }) state@{ channels } timerRef = do
+  handleClientMessage (LeaveChannel { user, channel }) state@{ channels, users } timerRef = do
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
       { message: "Leave channel: " <> show channel }
     ChannelBus.send channel $ ChannelLeft { channel, user }
     let maybeSubscriptionRef = Map.lookup channel channels
     traverse_ ChannelBus.unsubscribe maybeSubscriptionRef
+    let newUsers = Map.delete channel users
     let newChannels = Map.delete channel channels
     pure $ Stetson.NoReply $ WebsocketState $
-      state { pingTimerRef = Just timerRef, channels = newChannels }
+      state { pingTimerRef = Just timerRef, channels = newChannels, users = newUsers }
 
   terminate _foreign _r (WebsocketState { channels, user: Just user }) = do
     liftEffect $ Logger.debug
