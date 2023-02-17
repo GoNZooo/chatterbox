@@ -26,6 +26,7 @@ type WebsocketStateData =
   , userSubscriptionRef :: Maybe SubscriptionRef
   , lastPing :: Maybe Int
   , pingTimerRef :: Maybe TimerRef
+  , users :: Map Channel (Array User)
   }
 
 derive instance newtypeWebsocketState :: Newtype WebsocketState _
