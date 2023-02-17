@@ -126,6 +126,7 @@ data ServerMessage
   = SendPing
   | UserMessage { event :: UserEvent }
   | ChannelMessage { channel :: Channel, event :: ChannelEvent }
+  | ChannelPopulation { channel :: Channel, users :: Array User }
 
 derive instance genericServerMessage :: Generic ServerMessage _
 derive instance eqServerMessage :: Eq ServerMessage
@@ -134,12 +135,15 @@ instance showServerMessage :: Show ServerMessage where
   show SendPing = "SendPing"
   show (UserMessage r) = "UserMessage " <> show r
   show (ChannelMessage r) = "ChannelMessage " <> show r
+  show (ChannelPopulation r) = "ChannelPopulation " <> show r
 
 instance writeForeignServerMessage :: WriteForeign ServerMessage where
   writeImpl SendPing = writeImpl { type: "SendPing" }
   writeImpl (UserMessage { event }) = writeImpl { type: "UserMessage", event }
   writeImpl (ChannelMessage { channel, event }) =
     writeImpl { type: "ChannelMessage", channel, event }
+  writeImpl (ChannelPopulation { channel, users }) =
+    writeImpl { type: "ChannelPopulation", channel, users }
 
 instance readForeignServerMessage :: ReadForeign ServerMessage where
   readImpl f = do
@@ -148,6 +152,7 @@ instance readForeignServerMessage :: ReadForeign ServerMessage where
       "SendPing" -> pure SendPing
       "UserMessage" -> UserMessage <$> readImpl f
       "ChannelMessage" -> ChannelMessage <$> readImpl f
+      "ChannelPopulation" -> ChannelPopulation <$> readImpl f
       _ -> fail $ ForeignError $ "Unknown type: " <> t
 
 newtype HasTypeField = HasTypeField { type :: String }

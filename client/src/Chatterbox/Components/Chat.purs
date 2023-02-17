@@ -6,8 +6,9 @@ module Chatterbox.Components.Chat
 
 import Prelude
 
-import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ServerMessage(..), User)
+import Chatterbox.Common.Types (Channel(..), ChannelEvent(..), ServerMessage, User)
 import Chatterbox.Common.Types as ClientMessage
+import Chatterbox.Common.Types as ServerMessage
 import Chatterbox.Components.Settings as Settings
 import Control.Monad.Maybe.Trans (MaybeT(..), runMaybeT)
 import Data.Array as Array
@@ -17,6 +18,7 @@ import Data.Map (Map)
 import Data.Map as Map
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (class Newtype, unwrap, wrap)
+import Data.Set (Set)
 import Data.Set as Set
 import Data.String (Pattern(..), Replacement(..))
 import Data.String as String
@@ -69,7 +71,7 @@ type StateRecord =
   , socket :: Maybe WebSocket
   , currentMessage :: String
   , webSocketSubscription :: Maybe H.SubscriptionId
-  , users :: Map Channel (Array User)
+  , users :: Map Channel (Set User)
   }
 
 data Action
@@ -126,7 +128,7 @@ component =
   render (State { events, currentMessage, currentChannel, user, users }) = do
     let
       channelEvents = fromMaybe [] $ currentChannel >>= \c -> Map.lookup c events
-      channelUsers = fromMaybe [] $ currentChannel >>= \c -> Map.lookup c users
+      channelUsers = fromMaybe Set.empty $ currentChannel >>= \c -> Map.lookup c users
     HH.div [ "chat-window" # wrap # HP.class_ ]
       [ HH.h1_ [ HH.text "Chatterbox" ]
       , HH.slot _settings unit Settings.component { username: unwrap user } SettingsOutput
@@ -158,11 +160,11 @@ component =
       [ "message-box" # wrap # HP.class_, "message-box" # wrap # HP.ref ] $
       events # map renderChannelEvent
 
-  renderChatUsers :: forall slots. Array User -> H.ComponentHTML Action slots m
+  renderChatUsers :: forall slots. Set User -> H.ComponentHTML Action slots m
   renderChatUsers users =
     HH.div [ "user-list" # wrap # HP.class_ ]
       [ HH.h3_ [ HH.text "Users" ]
-      , HH.ul_ $ users # map \user -> HH.li_ [ HH.text $ unwrap user ]
+      , HH.ul_ $ users # Set.toUnfoldable # map \user -> HH.li_ [ HH.text $ unwrap user ]
       ]
 
   renderChannelEvent :: forall slots. ChannelEvent -> H.ComponentHTML Action slots m
@@ -213,26 +215,7 @@ component =
       channel <- MaybeT $ pure maybeChannel
       { channel, message } # ClientMessage.SendMessage # sendString socket
     scrollMessagesToBottom
-
-  handleAction (SocketEvent { event: ChannelMessage { event: ChannelJoined { user, channel } } }) = do
-    { users } <- get
-    let newUsersInChannel = Map.insertWith (<>) channel [ user ] users
-    Console.logShow newUsersInChannel
-    modify_ $ _ { users = newUsersInChannel }
-  handleAction (SocketEvent { event: ChannelMessage { event: ChannelLeft { user, channel } } }) = do
-    { user: ourUser, currentChannel, events, users } <- get
-    when (user == ourUser) do
-      modify_ $ _ { events = Map.delete channel events }
-    when (currentChannel == Just channel) do
-      modify_ $ _ { currentChannel = events # Map.keys # Array.fromFoldable # Array.head }
-    let newUsersInChannel = Map.alter (map (Array.delete user)) channel users
-    modify_ $ _ { users = newUsersInChannel }
-  handleAction (SocketEvent { event: ChannelMessage { channel, event } }) = do
-    modify_ $ \s -> s
-      { events = Map.insertWith (<>) channel [ event ] s.events }
-    scrollMessagesToBottom
-  handleAction (SocketEvent {}) = do
-    pure unit
+  handleAction (SocketEvent { event }) = handleServerMessage event
   handleAction (Receive { user }) = do
     modify_ $ _ { user = user }
     socket <- gets _.socket
@@ -265,6 +248,53 @@ component =
     { socket: maybeSocket } <- get
     traverse_ (\s -> sendOnReady s [ ClientMessage.SetUsername { user } ]) maybeSocket
     modify_ $ _ { user = user }
+
+  handleServerMessage :: forall slots. ServerMessage -> H.HalogenM State Action slots Output m Unit
+  handleServerMessage (ServerMessage.ChannelMessage { channel, event }) =
+    handleChannelEvent channel event
+  handleServerMessage (ServerMessage.UserMessage {}) =
+    pure unit
+  handleServerMessage (ServerMessage.ChannelPopulation { channel, users }) = do
+    modify_ $ \s -> s { users = Map.insert channel (Set.fromFoldable users) s.users }
+    pure unit
+  handleServerMessage ServerMessage.SendPing =
+    pure unit
+
+  handleChannelEvent
+    :: forall slots
+     . Channel
+    -> ChannelEvent
+    -> H.HalogenM State Action slots Output m Unit
+  handleChannelEvent channel event@(ChannelJoined { user }) = do
+    { users, events } <- get
+    let newUsersInChannel = Map.insertWith (<>) channel (Set.fromFoldable [ user ]) users
+    Console.logShow newUsersInChannel
+    modify_ $ _ { users = newUsersInChannel, events = Map.insertWith (<>) channel [ event ] events }
+  handleChannelEvent channel event@(ChannelLeft { user }) = do
+    { user: ourUser, currentChannel, events, users } <- get
+    when (user == ourUser) do
+      modify_ $ _ { events = Map.delete channel events }
+      when (currentChannel == Just channel) do
+        modify_ $ _ { currentChannel = events # Map.keys # Array.fromFoldable # Array.head }
+    let newUsersInChannel = Map.alter (map (Set.delete user)) channel users
+    modify_ $ _ { users = newUsersInChannel, events = Map.insertWith (<>) channel [ event ] events }
+  handleChannelEvent channel event@(UserRenamed { oldName, newName }) = do
+    { users, events } <- get
+    let
+      newUsersInChannel =
+        Map.alter
+          ( map
+              ( Array.fromFoldable
+                  >>> map (\u -> if u == oldName then newName else u)
+                  >>> Set.fromFoldable
+              )
+          )
+          channel
+          users
+    modify_ $ _ { events = Map.insertWith (<>) channel [ event ] events, users = newUsersInChannel }
+  handleChannelEvent channel event@(ChannelMessageSent {}) = do
+    modify_ $ \s -> s { events = Map.insertWith (<>) channel [ event ] s.events }
+    scrollMessagesToBottom
 
   interpretInput :: User -> String -> Array Action
   interpretInput _user input = do

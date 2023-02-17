@@ -140,15 +140,11 @@ websocketHandler =
   wsHandle frame (WebsocketState state@{ pingTimerRef }) = do
     liftEffect $ traverse_ Timer.cancel pingTimerRef
     timerRef <- schedulePingMessage
-    liftEffect $ Logger.debug { domain: atom "websocket" : atom "Frame" : nil, type: Logger.Trace }
-      { message: "Received frame: " <> frameToString frame }
     handleFrame frame state timerRef
 
   -- Like a classic `handle_info`; handles arbitrary messages sent to the process. This will be
   -- used to react to messages that come in from subscriptions.
   wsInfo SendPing state = do
-    liftEffect $ Logger.debug { domain: atom "websocket" : atom "SendPing" : nil, type: Logger.Trace }
-      { message: "Sending ping" }
     pure $ Stetson.Reply ((PingFrame $ Utf8Binary.toBinary "42") : nil) state
 
   wsInfo (ChannelMessage { event, channel }) state = do
@@ -228,14 +224,18 @@ websocketHandler =
       { message: "Join channel: " <> show channel }
     subscriptionRef <- ChannelBus.subscribe channel \event -> ChannelMessage { event, channel }
     ChannelBus.send channel $ ChannelJoined { channel, user }
-    usersInChannel <- liftEffect $ ChannelCounter.getUsers channel
+    usersInChannel <- liftEffect $ Array.fromFoldable <$> ChannelCounter.getUsers channel
     Console.log $ "Users in channel: " <> show usersInChannel
-
-    let newUsers = Map.insert channel usersInChannel users
-    Console.log $ "New users JOIN: " <> show newUsers
-    let newChannels = Map.insert channel subscriptionRef state.channels
-    pure $ Stetson.NoReply $ WebsocketState $
-      state { pingTimerRef = Just timerRef, channels = newChannels, users = newUsers }
+    let
+      newUsers = Map.insert channel usersInChannel users
+      newChannels = Map.insert channel subscriptionRef state.channels
+      usersPopulationMessage =
+        { channel, users: usersInChannel } # ChannelPopulation # Json.writeJSON # TextFrame
+    pure
+      $ Stetson.Reply (usersPopulationMessage : nil)
+      $ WebsocketState
+      $
+        state { pingTimerRef = Just timerRef, channels = newChannels, users = newUsers }
 
   handleClientMessage (LeaveChannel { user, channel }) state@{ channels, users } timerRef = do
     liftEffect $ Logger.debug { domain: atom "websocket" : atom "message" : nil, type: Logger.Trace }
